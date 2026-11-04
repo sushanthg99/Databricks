@@ -1,0 +1,206 @@
+# =============================================================================
+# Databricks Asset Bundle — Job Resource Definition
+# Bronze Ingestion Job
+# =============================================================================
+#
+# PURPOSE:
+#   Defines the Databricks Workflows job for Bronze layer ingestion.
+#   This file is referenced by databricks.yml via the `include: resources/*.yml`
+#   directive and deployed with `databricks bundle deploy --target {env}`.
+#
+# USAGE:
+#   Deploy:  databricks bundle deploy --target dev
+#   Run:     databricks bundle run bronze_ingestion_job --target dev
+#
+# IMPORTANT:
+#   - Replace ALL <PLACEHOLDER_*> values before deploying.
+#   - Never store cluster IDs, instance pool IDs, or workspace-specific
+#     resource IDs as hardcoded values. Use bundle variables instead.
+#   - Compute settings (instance type, autoscale) should be defined via a
+#     Cluster Policy in the Databricks workspace, referenced by policy_id.
+#   - Job parameters are passed at runtime — do not hardcode source_system.
+#
+# See also:
+#   databricks.yml         — bundle root with targets and variables
+#   docs/deployment_guide.md — full deploy and run instructions
+# =============================================================================
+
+resources:
+  jobs:
+
+    # -------------------------------------------------------------------------
+    # Bronze Ingestion Job
+    # -------------------------------------------------------------------------
+    bronze_ingestion_job:
+      name: "[${bundle.target}] Bronze Ingestion — Dynamic Framework"
+      description: >
+        Metadata-driven Bronze ingestion job. Reads active dataset configurations
+        from Unity Catalog, ingests files from AWS S3 using Auto Loader or batch
+        mode, and writes raw data to Delta Bronze tables.
+
+      # Email notifications — replace placeholders with real addresses
+      email_notifications:
+        on_failure:
+          - <PLACEHOLDER_ALERT_EMAIL>
+        # on_success: []   # Uncomment if success notifications are needed
+
+      # Job-level timeout (milliseconds) — 4 hours
+      timeout_seconds: 14400
+
+      # Maximum concurrent runs — typically 1 for ingestion jobs
+      max_concurrent_runs: 1
+
+      # Job-level parameters (defaults; can be overridden at runtime)
+      parameters:
+        - name: source_system
+          default: ecommerce
+        - name: environment
+          default: dev
+        - name: run_mode
+          default: incremental
+        - name: dataset_name
+          default: ""                   # Empty = run all active datasets
+
+      # -----------------------------------------------------------------------
+      # Job Cluster
+      # -----------------------------------------------------------------------
+      # IMPORTANT:
+      #   - Do NOT hardcode cluster IDs (instance-specific, not portable).
+      #   - Use a Cluster Policy for governance and cost control.
+      #   - The cluster spec below is a TEMPLATE — fill in actual values
+      #     via Cluster Policy or bundle variable overrides per target.
+      #
+      # TODO: Replace <PLACEHOLDER_*> with values from your workspace.
+      # TODO: Confirm node type, autoscale min/max, and DBR version with the team.
+      # -----------------------------------------------------------------------
+      job_clusters:
+        - job_cluster_key: ingestion_cluster
+          new_cluster:
+            # Databricks Runtime version — use LTS release for stability
+            spark_version: 13.3.x-scala2.12          # TODO: Update to latest LTS
+            node_type_id: <PLACEHOLDER_NODE_TYPE_ID>  # e.g. i3.xlarge, m5d.2xlarge
+            num_workers: 2                             # TODO: Tune per data volume
+
+            # TODO: Replace with actual Cluster Policy ID from your workspace
+            # policy_id: <PLACEHOLDER_CLUSTER_POLICY_ID>
+
+            # Auto-termination after 30 minutes of inactivity
+            autotermination_minutes: 30
+
+            # AWS attributes — IAM role for S3 access (no access keys)
+            aws_attributes:
+              instance_profile_arn: <PLACEHOLDER_IAM_INSTANCE_PROFILE_ARN>
+              # availability: SPOT_WITH_FALLBACK   # Uncomment for cost optimisation
+              # first_on_demand: 1
+
+            # Spark configuration
+            spark_conf:
+              spark.databricks.delta.preview.enabled: "true"
+              spark.sql.extensions: io.delta.sql.DeltaSparkSessionExtension
+              spark.sql.catalog.spark_catalog: org.apache.spark.sql.delta.catalog.DeltaCatalog
+              # TODO: Add Unity Catalog config if not already set at workspace level
+              # spark.databricks.unityCatalog.enabled: "true"
+
+            # Log delivery (optional)
+            # cluster_log_conf:
+            #   dbfs:
+            #     destination: dbfs:/cluster-logs/${bundle.target}/ingestion
+
+      # -----------------------------------------------------------------------
+      # Tasks
+      # -----------------------------------------------------------------------
+      tasks:
+
+        # -----------------------------------------------------------------------
+        # Task 1: Register Metadata
+        # Loads YAML configs into Unity Catalog metadata tables.
+        # Skips datasets whose config hash has not changed.
+        # -----------------------------------------------------------------------
+        - task_key: register_metadata
+          description: >
+            Load YAML dataset configurations into Unity Catalog metadata tables
+            using hash-based deduplication (skip unchanged configs).
+          job_cluster_key: ingestion_cluster
+
+          notebook_task:
+            notebook_path: ${workspace.file_path}/notebooks/bronze_ingestion_notebook
+            base_parameters:
+              run_mode: metadata_only
+              source_system: "{{job.parameters.source_system}}"
+              environment: "{{job.parameters.environment}}"
+              dataset_name: "{{job.parameters.dataset_name}}"
+
+          # Task-level timeout — metadata registration should be fast
+          timeout_seconds: 600
+
+          # Retry on transient failures (e.g., Unity Catalog connectivity)
+          max_retries: 2
+          min_retry_interval_millis: 30000
+
+        # -----------------------------------------------------------------------
+        # Task 2: Bronze Ingestion
+        # Reads active datasets from metadata, ingests from S3, writes Bronze.
+        # Depends on: register_metadata (must complete first)
+        # -----------------------------------------------------------------------
+        - task_key: run_bronze_ingestion
+          description: >
+            Ingest active datasets from AWS S3 into Delta Bronze tables using
+            Auto Loader (incremental) or batch overwrite (full load) based on
+            each dataset's ingestion_config.
+          job_cluster_key: ingestion_cluster
+          depends_on:
+            - task_key: register_metadata
+
+          notebook_task:
+            notebook_path: ${workspace.file_path}/notebooks/bronze_ingestion_notebook
+            base_parameters:
+              run_mode: "{{job.parameters.run_mode}}"
+              source_system: "{{job.parameters.source_system}}"
+              environment: "{{job.parameters.environment}}"
+              dataset_name: "{{job.parameters.dataset_name}}"
+
+          timeout_seconds: 10800    # 3 hours for large ingestion runs
+          max_retries: 1
+          min_retry_interval_millis: 60000
+
+        # -----------------------------------------------------------------------
+        # Task 3: Silver Transformation (placeholder — Phase 2)
+        # -----------------------------------------------------------------------
+        # TODO (Phase 2): Uncomment and implement Silver task
+        # - task_key: run_silver_transformation
+        #   description: >
+        #     Apply cleansing, DQ checks, and MERGE INTO Silver Delta tables.
+        #   job_cluster_key: ingestion_cluster
+        #   depends_on:
+        #     - task_key: run_bronze_ingestion
+        #   notebook_task:
+        #     notebook_path: ${workspace.file_path}/notebooks/silver_transformation_notebook
+        #     base_parameters:
+        #       source_system: "{{job.parameters.source_system}}"
+        #       environment: "{{job.parameters.environment}}"
+        #   timeout_seconds: 7200
+
+        # -----------------------------------------------------------------------
+        # Task 4: Gold Transformation (placeholder — Phase 3)
+        # -----------------------------------------------------------------------
+        # TODO (Phase 3): Uncomment and implement Gold task
+        # - task_key: run_gold_transformation
+        #   description: >
+        #     Apply business aggregations and write Gold Delta tables.
+        #   job_cluster_key: ingestion_cluster
+        #   depends_on:
+        #     - task_key: run_silver_transformation
+        #   notebook_task:
+        #     notebook_path: ${workspace.file_path}/notebooks/gold_transformation_notebook
+        #     base_parameters:
+        #       source_system: "{{job.parameters.source_system}}"
+        #       environment: "{{job.parameters.environment}}"
+        #   timeout_seconds: 3600
+
+      # -----------------------------------------------------------------------
+      # Job schedule (optional — uncomment to enable)
+      # -----------------------------------------------------------------------
+      # schedule:
+      #   quartz_cron_expression: "0 0 6 * * ?"   # Daily at 06:00 UTC
+      #   timezone_id: UTC
+      #   pause_status: UNPAUSED                   # PAUSED | UNPAUSED

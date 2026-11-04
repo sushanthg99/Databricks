@@ -1,0 +1,269 @@
+# =============================================================================
+# Domain Configuration — Dynamic Databricks Ingestion Framework
+# =============================================================================
+#
+# PURPOSE:
+#   This file defines dataset-level ingestion configurations.
+#   Each entry under `datasets` represents one logical dataset and maps to
+#   a row in the `ingestion_config` and `dataset_registry` metadata tables.
+#
+# IMPORTANT:
+#   - This is an ILLUSTRATIVE EXAMPLE with placeholder values.
+#   - Do NOT include real S3 bucket names, credentials, or sensitive data.
+#   - Do NOT commit environment-specific paths or tokens to version control.
+#   - Copy this file per source system and per environment as needed.
+#   - The metadata_loader.py module reads and validates these configs.
+#
+# LOADED BY: ingestion_framework/metadata_service/metadata_loader.py
+# =============================================================================
+
+# Top-level source system identifier — all datasets below belong to this system
+source_system: ecommerce
+
+# Default environment — can be overridden at job runtime via widget/parameter
+environment: dev
+
+# =============================================================================
+# Dataset Configurations
+# =============================================================================
+datasets:
+
+  # ---------------------------------------------------------------------------
+  # Dataset: Orders (CSV, incremental via Auto Loader)
+  # ---------------------------------------------------------------------------
+  - dataset_name: orders
+    version: "1.0"
+    dataset_type: transactional
+    data_tier: bronze
+    business_description: >
+      Customer order transactions from the ecommerce platform.
+      Contains order ID, customer ID, product IDs, quantities, and timestamps.
+    criticality: high
+    classification: internal
+    pii: false
+    active: true
+
+    # Source file configuration
+    file_pattern: "orders_*.csv"
+    frequency: daily
+
+    # Ingestion engine settings
+    ingestion_mode: auto_loader       # auto_loader | batch
+    load_type: incremental            # incremental | full
+
+    # AWS S3 source location (use placeholder values — no real paths)
+    s3_bucket: <PLACEHOLDER_S3_BUCKET_NAME>
+    s3_path: raw/ecommerce/orders/
+
+    # File format and parsing options
+    format: csv
+    delimiter: ","
+    encoding: UTF-8
+    header: true
+    multiline: false
+
+    # Primary keys for MERGE / deduplication (Silver layer)
+    primary_keys:
+      - order_id
+
+    # Watermark for incremental Silver processing
+    watermark:
+      column: order_timestamp
+      delay: "2 hours"
+
+    # Auto Loader schema and checkpoint Unity Catalog volume paths
+    # These are template paths — actual paths injected from environment config
+    checkpoint_location: /Volumes/<PLACEHOLDER_CATALOG>/ingestion_metadata/autoloader_volume/checkpoints/orders/
+    schema_location: /Volumes/<PLACEHOLDER_CATALOG>/ingestion_metadata/autoloader_volume/schemas/orders/
+
+    # Tags applied to dataset_tags metadata table
+    tags:
+      domain: ecommerce
+      owner: data-engineering-team
+      retention_days: "365"
+      sensitivity: standard
+
+    # Data quality rules loaded into dq_sla_config
+    data_quality:
+      - rule_name: order_id_not_null
+        rule_type: not_null
+        column_name: order_id
+        threshold_pct: 100.0
+        fail_on_breach: true
+
+      - rule_name: order_amount_positive
+        rule_type: range
+        column_name: order_amount
+        rule_expression: "order_amount > 0"
+        threshold_pct: 99.5
+        fail_on_breach: false
+
+      - rule_name: order_status_valid
+        rule_type: regex
+        column_name: order_status
+        rule_expression: "^(PENDING|CONFIRMED|SHIPPED|DELIVERED|CANCELLED)$"
+        threshold_pct: 99.0
+        fail_on_breach: false
+
+  # ---------------------------------------------------------------------------
+  # Dataset: Customers (JSON, full load / batch overwrite)
+  # ---------------------------------------------------------------------------
+  - dataset_name: customers
+    version: "1.0"
+    dataset_type: reference
+    data_tier: bronze
+    business_description: >
+      Customer master data including contact details and account information.
+      This is a full snapshot delivered daily.
+    criticality: high
+    classification: confidential
+    pii: true                         # Contains PII — see OQ-012 for handling policy
+    active: true
+
+    file_pattern: "customers_full_*.json"
+    frequency: daily
+
+    ingestion_mode: batch
+    load_type: full                   # Full overwrite — entire table replaced each run
+
+    s3_bucket: <PLACEHOLDER_S3_BUCKET_NAME>
+    s3_path: raw/ecommerce/customers/
+
+    format: json
+    encoding: UTF-8
+    multiline: false                  # Each line is a valid JSON object
+
+    primary_keys:
+      - customer_id
+
+    watermark:
+      column: updated_at
+      delay: "0 hours"
+
+    checkpoint_location: /Volumes/<PLACEHOLDER_CATALOG>/ingestion_metadata/autoloader_volume/checkpoints/customers/
+    schema_location: /Volumes/<PLACEHOLDER_CATALOG>/ingestion_metadata/autoloader_volume/schemas/customers/
+
+    tags:
+      domain: ecommerce
+      owner: data-engineering-team
+      retention_days: "730"
+      sensitivity: pii
+      pii_columns: "email,phone,address"
+
+    data_quality:
+      - rule_name: customer_id_not_null
+        rule_type: not_null
+        column_name: customer_id
+        threshold_pct: 100.0
+        fail_on_breach: true
+
+      - rule_name: email_format_valid
+        rule_type: regex
+        column_name: email
+        rule_expression: "^[a-zA-Z0-9._%+\\-]+@[a-zA-Z0-9.\\-]+\\.[a-zA-Z]{2,}$"
+        threshold_pct: 95.0
+        fail_on_breach: false
+
+  # ---------------------------------------------------------------------------
+  # Dataset: Products (Parquet, incremental via Auto Loader)
+  # ---------------------------------------------------------------------------
+  - dataset_name: products
+    version: "2.0"
+    dataset_type: reference
+    data_tier: bronze
+    business_description: >
+      Product catalogue data including SKUs, categories, pricing, and stock levels.
+      Delivered as Parquet files by the product management system.
+    criticality: medium
+    classification: internal
+    pii: false
+    active: true
+
+    file_pattern: "products_*.parquet"
+    frequency: hourly
+
+    ingestion_mode: auto_loader
+    load_type: incremental
+
+    s3_bucket: <PLACEHOLDER_S3_BUCKET_NAME>
+    s3_path: raw/ecommerce/products/
+
+    format: parquet
+    encoding: UTF-8
+
+    primary_keys:
+      - product_id
+      - sku
+
+    watermark:
+      column: last_modified
+      delay: "30 minutes"
+
+    checkpoint_location: /Volumes/<PLACEHOLDER_CATALOG>/ingestion_metadata/autoloader_volume/checkpoints/products/
+    schema_location: /Volumes/<PLACEHOLDER_CATALOG>/ingestion_metadata/autoloader_volume/schemas/products/
+
+    tags:
+      domain: ecommerce
+      owner: product-team
+      retention_days: "365"
+      sensitivity: standard
+
+    data_quality:
+      - rule_name: product_id_not_null
+        rule_type: not_null
+        column_name: product_id
+        threshold_pct: 100.0
+        fail_on_breach: true
+
+      - rule_name: price_positive
+        rule_type: range
+        column_name: unit_price
+        rule_expression: "unit_price > 0"
+        threshold_pct: 100.0
+        fail_on_breach: true
+
+  # ---------------------------------------------------------------------------
+  # Dataset: Order Events (JSON, incremental — currently INACTIVE)
+  # ---------------------------------------------------------------------------
+  - dataset_name: order_events
+    version: "1.0"
+    dataset_type: event
+    data_tier: bronze
+    business_description: >
+      Event stream records for order lifecycle events (status changes, payments, etc.)
+      Ingestion not yet enabled — pending source system readiness.
+    criticality: medium
+    classification: internal
+    pii: false
+    active: false                     # INACTIVE — will not be processed by ingestion engine
+
+    file_pattern: "order_events_*.json"
+    frequency: hourly
+
+    ingestion_mode: auto_loader
+    load_type: incremental
+
+    s3_bucket: <PLACEHOLDER_S3_BUCKET_NAME>
+    s3_path: raw/ecommerce/order_events/
+
+    format: json
+    encoding: UTF-8
+    multiline: false
+
+    primary_keys:
+      - event_id
+
+    watermark:
+      column: event_timestamp
+      delay: "1 hour"
+
+    checkpoint_location: /Volumes/<PLACEHOLDER_CATALOG>/ingestion_metadata/autoloader_volume/checkpoints/order_events/
+    schema_location: /Volumes/<PLACEHOLDER_CATALOG>/ingestion_metadata/autoloader_volume/schemas/order_events/
+
+    tags:
+      domain: ecommerce
+      owner: data-engineering-team
+      retention_days: "90"
+      sensitivity: standard
+
+    data_quality: []                  # No DQ rules defined yet

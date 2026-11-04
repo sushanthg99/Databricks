@@ -1,0 +1,115 @@
+# =============================================================================
+# Databricks Asset Bundle (DAB) Configuration
+# Dynamic Databricks Ingestion Framework
+# =============================================================================
+#
+# USAGE:
+#   Deploy to dev:  databricks bundle deploy --target dev
+#   Deploy to uat:  databricks bundle deploy --target uat
+#   Deploy to prod: databricks bundle deploy --target prod
+#
+#   Run a job:      databricks bundle run bronze_ingestion_job --target dev
+#
+# IMPORTANT:
+#   - Replace all <PLACEHOLDER_*> values before deploying.
+#   - Never store workspace URLs, tokens, or credentials in this file.
+#   - Use Databricks secrets or environment variables for sensitive values.
+#   - Workspace host and token are resolved from ~/.databrickscfg or
+#     the DATABRICKS_HOST / DATABRICKS_TOKEN environment variables.
+# =============================================================================
+
+bundle:
+  name: dynamic-databricks-ingestion
+
+# -----------------------------------------------------------------------------
+# Variables — override per target
+# -----------------------------------------------------------------------------
+variables:
+  catalog_name:
+    description: "Unity Catalog catalog name for this environment"
+    default: "dev_catalog"
+
+  metadata_schema:
+    description: "Schema (database) name where metadata tables live"
+    default: "ingestion_metadata"
+
+  bronze_schema_prefix:
+    description: "Prefix for Bronze Delta schemas (e.g. ecommerce_bronze)"
+    default: "bronze"
+
+  job_cluster_key:
+    description: "Reference key for the job cluster definition"
+    default: "ingestion_cluster"
+
+# -----------------------------------------------------------------------------
+# Workspace sync — files deployed to workspace
+# -----------------------------------------------------------------------------
+workspace:
+  # PLACEHOLDER: Set your workspace host per target (see targets section below)
+  # host: https://<PLACEHOLDER_WORKSPACE_HOST>.azuredatabricks.net
+
+  root_path: /Workspace/Shared/dynamic-databricks-ingestion/${bundle.target}
+
+  # Files to sync to the workspace
+  file_path: ${workspace.root_path}/files
+
+# -----------------------------------------------------------------------------
+# Artifact / resource inclusions
+# -----------------------------------------------------------------------------
+include:
+  - resources/*.yml
+
+# Sync paths — only include project source, exclude dev artifacts
+sync:
+  include:
+    - ingestion_framework/**
+    - src/**
+    - configs/**
+    - notebooks/**
+    - sql/**
+  exclude:
+    - "**/__pycache__/**"
+    - "**/*.pyc"
+    - ".venv/**"
+    - "tests/**"
+    - "docs/**"
+    - ".kiro/**"
+
+# -----------------------------------------------------------------------------
+# Deployment Targets
+# -----------------------------------------------------------------------------
+targets:
+
+  # --- Development ---
+  dev:
+    mode: development
+    default: true
+    workspace:
+      host: <PLACEHOLDER_DEV_WORKSPACE_HOST>
+      # Token resolved from DATABRICKS_TOKEN env var or ~/.databrickscfg
+    variables:
+      catalog_name: dev_catalog
+      metadata_schema: ingestion_metadata
+      bronze_schema_prefix: bronze
+
+  # --- User Acceptance Testing ---
+  uat:
+    mode: staging
+    workspace:
+      host: <PLACEHOLDER_UAT_WORKSPACE_HOST>
+    variables:
+      catalog_name: uat_catalog
+      metadata_schema: ingestion_metadata
+      bronze_schema_prefix: bronze
+
+  # --- Production ---
+  prod:
+    mode: production
+    workspace:
+      host: <PLACEHOLDER_PROD_WORKSPACE_HOST>
+    variables:
+      catalog_name: prod_catalog
+      metadata_schema: ingestion_metadata
+      bronze_schema_prefix: bronze
+    # Production deployments should require explicit approval
+    # Configure via Databricks workspace permissions, not in this file

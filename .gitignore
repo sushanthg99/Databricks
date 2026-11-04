@@ -1,0 +1,149 @@
+# =============================================================================
+# Dynamic Databricks Ingestion Framework — .gitignore
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Credentials & Secrets — NEVER commit these
+# -----------------------------------------------------------------------------
+.env
+.env.*
+*.env
+secrets/
+credentials/
+**/credentials.json
+**/service_account*.json
+**/aws_credentials
+**/.aws/credentials
+*.pem
+*.key
+*.p12
+*.pfx
+*.token
+databricks_token*
+databricks_pat*
+
+# -----------------------------------------------------------------------------
+# Python
+# -----------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+parts/
+var/
+sdist/
+develop-eggs/
+.installed.cfg
+lib/
+lib64/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+.virtualenv/
+.pyenv/
+
+# Distribution / packaging
+*.whl
+*.tar.gz
+
+# Jupyter / IPython
+.ipynb_checkpoints/
+*.ipynb
+
+# -----------------------------------------------------------------------------
+# Testing & Coverage
+# -----------------------------------------------------------------------------
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+*.cover
+.hypothesis/
+junit*.xml
+test-results/
+
+# Linting / Type checking
+.mypy_cache/
+.ruff_cache/
+.flake8
+
+# -----------------------------------------------------------------------------
+# Databricks
+# -----------------------------------------------------------------------------
+# Local Databricks CLI state
+.databricks/
+.databrickscfg
+databricks.env
+
+# DAB generated / cached files
+.bundle/
+bundle.lock
+
+# Auto Loader checkpoints (never commit local checkpoint state)
+**/checkpoints/
+**/schemas/
+
+# Databricks Connect local config
+.databricks-connect
+
+# -----------------------------------------------------------------------------
+# IDE & Editor files
+# -----------------------------------------------------------------------------
+# VS Code / Kiro
+.vscode/
+*.code-workspace
+
+# JetBrains (PyCharm, IntelliJ)
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# Vim
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# -----------------------------------------------------------------------------
+# Logs & Temporary files
+# -----------------------------------------------------------------------------
+*.log
+*.tmp
+*.temp
+logs/
+tmp/
+
+# -----------------------------------------------------------------------------
+# Spark / Delta local artifacts
+# -----------------------------------------------------------------------------
+spark-warehouse/
+derby.log
+metastore_db/
+
+# Local Delta tables (dev only)
+delta_tables/
+_delta_log/

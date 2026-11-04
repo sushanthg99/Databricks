@@ -1,0 +1,85 @@
+# =============================================================================
+# UAT (User Acceptance Testing) Environment Configuration
+# Dynamic Databricks Ingestion Framework
+# =============================================================================
+#
+# PURPOSE:
+#   Environment-specific variable overrides for the UAT environment.
+#   UAT mirrors production configuration as closely as possible,
+#   but uses separate infrastructure and a reduced data volume.
+#
+# IMPORTANT:
+#   - Replace ALL <PLACEHOLDER_*> values before deploying.
+#   - Never commit real workspace URLs, S3 bucket names, or secret scope names.
+#   - Credentials are NEVER stored here — use Databricks secret scopes.
+# =============================================================================
+
+environment: uat
+
+# -----------------------------------------------------------------------------
+# Unity Catalog
+# -----------------------------------------------------------------------------
+unity_catalog:
+  catalog_name: uat_catalog
+  metadata_schema: ingestion_metadata
+
+  volumes:
+    base_path: /Volumes/uat_catalog/ingestion_metadata/autoloader_volume
+    schemas_path: /Volumes/uat_catalog/ingestion_metadata/autoloader_volume/schemas
+    checkpoints_path: /Volumes/uat_catalog/ingestion_metadata/autoloader_volume/checkpoints
+
+  bronze_schema_suffix: bronze
+  silver_schema_suffix: silver
+  gold_schema_suffix: gold
+
+# -----------------------------------------------------------------------------
+# AWS S3 Source Storage
+# -----------------------------------------------------------------------------
+s3:
+  source_bucket: <PLACEHOLDER_UAT_S3_BUCKET_NAME>
+  source_base_path: raw/
+  external_location: <PLACEHOLDER_UAT_EXTERNAL_LOCATION_NAME>
+  region: <PLACEHOLDER_AWS_REGION>
+
+# -----------------------------------------------------------------------------
+# Databricks Workspace
+# -----------------------------------------------------------------------------
+databricks:
+  workspace_host: <PLACEHOLDER_UAT_WORKSPACE_HOST>
+  cluster_policy: <PLACEHOLDER_UAT_CLUSTER_POLICY_NAME>
+
+# -----------------------------------------------------------------------------
+# Ingestion Engine Settings
+# -----------------------------------------------------------------------------
+ingestion:
+  default_trigger: AvailableNow
+  max_files_per_trigger: 5000
+  schema_evolution_mode: addNewColumns
+  rescue_data_column: true
+  log_level: INFO                     # Less verbose than dev; matches prod level
+
+# -----------------------------------------------------------------------------
+# Secret Scopes
+# -----------------------------------------------------------------------------
+secrets:
+  api_credentials_scope: api-secrets-uat
+  databricks_scope: databricks-secrets-uat
+
+# -----------------------------------------------------------------------------
+# Data Quality Settings
+# -----------------------------------------------------------------------------
+data_quality:
+  # In UAT: honour DQ config as-is (same as prod behaviour)
+  fail_on_breach_override: null       # null = use per-rule setting from dq_sla_config
+  quarantine_schema: uat_catalog.ingestion_metadata
+  quarantine_table_suffix: _quarantine
+
+# -----------------------------------------------------------------------------
+# Notification Settings
+# -----------------------------------------------------------------------------
+notifications:
+  enabled: true
+  # UAT notifications go to the engineering team only
+  # email_recipients: ["<PLACEHOLDER_TEAM_EMAIL>"]
+  # slack_webhook_scope: monitoring-secrets-uat
+  # slack_webhook_key: uat-alerts-webhook

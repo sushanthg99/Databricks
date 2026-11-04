@@ -1,0 +1,70 @@
+# =============================================================================
+# Dynamic Databricks Ingestion Framework — Python Dependencies
+# =============================================================================
+# Notes:
+#   - PySpark and Databricks Runtime libraries are provided by the cluster.
+#     Do NOT pin pyspark here unless running fully local (non-Databricks) tests.
+#   - Pin exact versions for reproducibility.
+#   - Separate sections: framework runtime, dev/test, optional.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Framework Runtime Dependencies
+# -----------------------------------------------------------------------------
+
+# YAML configuration loading
+PyYAML==6.0.1
+
+# AWS SDK — for S3 interactions outside of Databricks Unity Catalog external locations
+# (Use IAM role / instance profile; never hardcode credentials)
+boto3==1.34.69
+botocore==1.34.69
+
+# HTTP client for REST API ingestion (api_fetcher.py)
+requests==2.31.0
+urllib3==2.2.1
+
+# Retry logic for HTTP and API calls
+tenacity==8.2.3
+
+# Data validation (schema / config validation)
+pydantic==2.6.4
+
+# Hashing utilities (SHA-256 for metadata change detection)
+# Built into Python stdlib (hashlib) — no extra package needed
+
+# -----------------------------------------------------------------------------
+# Development & Testing Dependencies
+# -----------------------------------------------------------------------------
+
+# Testing framework
+pytest==8.1.1
+pytest-cov==5.0.0
+pytest-mock==3.14.0
+
+# PySpark local testing (lightweight; matches common Databricks LTS versions)
+# Uncomment if running unit tests locally without a Databricks cluster:
+# pyspark==3.5.1
+
+# Linting
+flake8==7.0.0
+ruff==0.4.1
+
+# Formatting
+black==24.3.0
+
+# Type checking
+mypy==1.9.0
+types-PyYAML==6.0.12.12
+types-requests==2.31.0.20240406
+
+# -----------------------------------------------------------------------------
+# Optional / CI Utilities
+# -----------------------------------------------------------------------------
+
+# Databricks CLI (for bundle deploy in CI pipelines)
+# Install separately: pip install databricks-cli==0.18.0
+# or use: pip install databricks-sdk==0.24.0
+
+# Pre-commit hooks
+pre-commit==3.7.0

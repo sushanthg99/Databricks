@@ -1,0 +1,243 @@
+# =============================================================================
+# API Source Configuration — Dynamic Databricks Ingestion Framework
+# =============================================================================
+#
+# PURPOSE:
+#   Defines REST API data source configurations for datasets that are pulled
+#   from external or internal APIs rather than file-based S3 sources.
+#
+# IMPORTANT:
+#   - This is an ILLUSTRATIVE EXAMPLE with placeholder values.
+#   - NEVER store API keys, tokens, passwords, or secrets in this file.
+#   - All credentials must be stored in Databricks Secret Scopes.
+#   - Reference secrets by scope/key name only (e.g., scope: "api-secrets", key: "weather-api-key")
+#
+# LOADED BY: ingestion_framework/metadata_service/metadata_loader.py
+#            src/api/api_fetcher.py
+# =============================================================================
+
+source_system: external_apis
+environment: dev
+
+# =============================================================================
+# API Source Configurations
+# =============================================================================
+api_sources:
+
+  # ---------------------------------------------------------------------------
+  # Source: External Pricing API
+  # Fetches current market pricing data for product categories.
+  # Authentication: Bearer token stored in Databricks secret scope.
+  # ---------------------------------------------------------------------------
+  - api_name: external_pricing_api
+    version: "1.0"
+    dataset_name: market_pricing
+    data_tier: bronze
+    business_description: >
+      External market pricing data for competitive analysis.
+      Fetched daily from the pricing data vendor API.
+    criticality: medium
+    classification: internal
+    pii: false
+    active: true
+
+    # API endpoint configuration
+    endpoint:
+      base_url: https://<PLACEHOLDER_API_HOST>/api/v2
+      path: /pricing/categories
+      method: GET
+
+    # Authentication — credentials stored in Databricks secret scope (never inline)
+    authentication:
+      type: bearer_token              # bearer_token | api_key | oauth2 | basic
+      secret_scope: api-secrets       # Databricks secret scope name
+      secret_key: pricing-api-token   # Key within the secret scope
+
+    # Request parameters
+    request_params:
+      static:
+        currency: USD
+        format: json
+      # Dynamic params injected at runtime (e.g., date range)
+      dynamic:
+        - param_name: date
+          source: runtime             # Injected as current run date
+        - param_name: category
+          source: config
+          values:
+            - electronics
+            - clothing
+            - home_garden
+
+    # Pagination strategy
+    pagination:
+      type: cursor                    # cursor | offset | page_number | none
+      cursor_field: next_cursor
+      page_size: 100
+      max_pages: 50                   # Safety limit — adjust per API rate limits
+
+    # Rate limiting
+    rate_limit:
+      requests_per_minute: 60
+      retry_on_429: true
+      retry_backoff_seconds: 30
+
+    # Response configuration
+    response:
+      root_key: data                  # JSON key containing the records array
+      schema_inference: true          # Infer schema from first response page
+      flatten_nested: true            # Flatten nested JSON objects
+
+    # Target Delta table
+    target_table: <PLACEHOLDER_CATALOG>.ecommerce_bronze.market_pricing
+
+    # Ingestion settings
+    frequency: daily
+    load_type: full                   # Replace all data each day
+
+    # DQ rules
+    data_quality:
+      - rule_name: price_not_null
+        rule_type: not_null
+        column_name: price
+        threshold_pct: 100.0
+        fail_on_breach: true
+
+    tags:
+      domain: pricing
+      owner: analytics-team
+      retention_days: "180"
+      sensitivity: standard
+
+  # ---------------------------------------------------------------------------
+  # Source: Internal Inventory API
+  # Fetches real-time inventory levels from the warehouse management system.
+  # Authentication: API key passed in request header.
+  # ---------------------------------------------------------------------------
+  - api_name: internal_inventory_api
+    version: "1.0"
+    dataset_name: inventory_levels
+    data_tier: bronze
+    business_description: >
+      Real-time inventory levels from the internal warehouse management system.
+      Used to reconcile stock against order fulfilment data.
+    criticality: high
+    classification: internal
+    pii: false
+    active: true
+
+    endpoint:
+      base_url: https://<PLACEHOLDER_INTERNAL_API_HOST>/wms/api
+      path: /inventory/current
+      method: GET
+
+    authentication:
+      type: api_key                   # API key in request header
+      secret_scope: api-secrets
+      secret_key: wms-api-key
+      header_name: X-API-Key         # Header name for the API key
+
+    request_params:
+      static:
+        include_zero_stock: true
+        format: json
+
+    pagination:
+      type: offset
+      offset_param: offset
+      limit_param: limit
+      page_size: 500
+      max_pages: 200
+
+    rate_limit:
+      requests_per_minute: 120
+      retry_on_429: true
+      retry_backoff_seconds: 15
+
+    response:
+      root_key: items
+      schema_inference: true
+      flatten_nested: false
+
+    target_table: <PLACEHOLDER_CATALOG>.ecommerce_bronze.inventory_levels
+
+    frequency: hourly
+    load_type: full
+
+    data_quality:
+      - rule_name: sku_not_null
+        rule_type: not_null
+        column_name: sku
+        threshold_pct: 100.0
+        fail_on_breach: true
+
+      - rule_name: quantity_non_negative
+        rule_type: range
+        column_name: quantity_on_hand
+        rule_expression: "quantity_on_hand >= 0"
+        threshold_pct: 100.0
+        fail_on_breach: true
+
+    tags:
+      domain: inventory
+      owner: operations-team
+      retention_days: "90"
+      sensitivity: standard
+
+  # ---------------------------------------------------------------------------
+  # Source: OAuth2 Analytics API (currently INACTIVE — Phase 4)
+  # Placeholder for OAuth2-authenticated source.
+  # TODO (OQ-010): Implement OAuth2 client credentials flow in api_fetcher.py
+  # ---------------------------------------------------------------------------
+  - api_name: analytics_platform_api
+    version: "1.0"
+    dataset_name: campaign_metrics
+    data_tier: bronze
+    business_description: >
+      Marketing campaign performance metrics from the analytics platform.
+      OAuth2 authentication — implementation pending (see OQ-010).
+    criticality: low
+    classification: internal
+    pii: false
+    active: false                     # INACTIVE — OAuth2 not yet implemented
+
+    endpoint:
+      base_url: https://<PLACEHOLDER_ANALYTICS_HOST>/api/v1
+      path: /campaigns/metrics
+      method: GET
+
+    authentication:
+      type: oauth2                    # TODO: Implement in api_fetcher.py (OQ-010)
+      secret_scope: api-secrets
+      client_id_key: analytics-client-id
+      client_secret_key: analytics-client-secret
+      token_url: https://<PLACEHOLDER_AUTH_HOST>/oauth/token
+
+    pagination:
+      type: page_number
+      page_param: page
+      page_size: 100
+      max_pages: 100
+
+    rate_limit:
+      requests_per_minute: 30
+      retry_on_429: true
+      retry_backoff_seconds: 60
+
+    response:
+      root_key: metrics
+      schema_inference: true
+      flatten_nested: true
+
+    target_table: <PLACEHOLDER_CATALOG>.marketing_bronze.campaign_metrics
+
+    frequency: daily
+    load_type: full
+
+    data_quality: []
+
+    tags:
+      domain: marketing
+      owner: marketing-analytics-team
+      retention_days: "365"
+      sensitivity: standard

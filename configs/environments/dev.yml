@@ -1,0 +1,108 @@
+# =============================================================================
+# Development Environment Configuration
+# Dynamic Databricks Ingestion Framework
+# =============================================================================
+#
+# PURPOSE:
+#   Environment-specific variable overrides for the DEVELOPMENT environment.
+#   These values are injected at runtime by the metadata_loader and ingestion
+#   engine when environment = "dev".
+#
+# IMPORTANT:
+#   - Replace ALL <PLACEHOLDER_*> values before deploying.
+#   - Never commit real workspace URLs, S3 bucket names, or secret scope names
+#     that reveal infrastructure details.
+#   - Credentials are NEVER stored here — use Databricks secret scopes.
+# =============================================================================
+
+environment: dev
+
+# -----------------------------------------------------------------------------
+# Unity Catalog
+# -----------------------------------------------------------------------------
+unity_catalog:
+  catalog_name: dev_catalog
+  metadata_schema: ingestion_metadata
+
+  # Unity Catalog Volume paths for Auto Loader internals
+  volumes:
+    base_path: /Volumes/dev_catalog/ingestion_metadata/autoloader_volume
+    schemas_path: /Volumes/dev_catalog/ingestion_metadata/autoloader_volume/schemas
+    checkpoints_path: /Volumes/dev_catalog/ingestion_metadata/autoloader_volume/checkpoints
+
+  # Schema naming convention: {domain}_{tier}
+  bronze_schema_suffix: bronze
+  silver_schema_suffix: silver
+  gold_schema_suffix: gold
+
+# -----------------------------------------------------------------------------
+# AWS S3 Source Storage
+# -----------------------------------------------------------------------------
+s3:
+  # Source landing bucket — use placeholder; configure via UC External Location
+  source_bucket: <PLACEHOLDER_DEV_S3_BUCKET_NAME>
+  source_base_path: raw/
+
+  # UC External Location name (configured separately in Databricks)
+  external_location: <PLACEHOLDER_DEV_EXTERNAL_LOCATION_NAME>
+
+  # Region (informational — access handled via IAM / UC External Location)
+  region: <PLACEHOLDER_AWS_REGION>
+
+# -----------------------------------------------------------------------------
+# Databricks Workspace
+# -----------------------------------------------------------------------------
+databricks:
+  workspace_host: <PLACEHOLDER_DEV_WORKSPACE_HOST>
+  # Token: resolved from ~/.databrickscfg [dev] or DATABRICKS_TOKEN env var
+  # NEVER store the token value here
+
+  # Job cluster configuration reference
+  # Actual cluster spec is in resources/databricks_job.yml
+  cluster_policy: <PLACEHOLDER_DEV_CLUSTER_POLICY_NAME>
+
+# -----------------------------------------------------------------------------
+# Ingestion Engine Settings
+# -----------------------------------------------------------------------------
+ingestion:
+  # Default trigger for Auto Loader streaming jobs
+  # AvailableNow: process all backlog then stop (recommended for scheduled jobs)
+  default_trigger: AvailableNow
+
+  # Maximum files to process per micro-batch (Auto Loader)
+  max_files_per_trigger: 1000
+
+  # Schema evolution mode: addNewColumns | failOnNewColumns | rescue
+  schema_evolution_mode: addNewColumns
+
+  # Whether to write rescued (unparseable) data to _rescued_data column
+  rescue_data_column: true
+
+  # Log level for ingestion engine
+  log_level: DEBUG                    # More verbose in dev
+
+# -----------------------------------------------------------------------------
+# Secret Scopes
+# -----------------------------------------------------------------------------
+secrets:
+  # Databricks secret scope names (not values)
+  api_credentials_scope: api-secrets-dev
+  databricks_scope: databricks-secrets-dev
+
+# -----------------------------------------------------------------------------
+# Data Quality Settings
+# -----------------------------------------------------------------------------
+data_quality:
+  # In dev: log DQ failures but don't abort (easier debugging)
+  fail_on_breach_override: false
+  quarantine_schema: dev_catalog.ingestion_metadata
+  quarantine_table_suffix: _quarantine
+
+# -----------------------------------------------------------------------------
+# Notification Settings (optional — Phase 4)
+# -----------------------------------------------------------------------------
+notifications:
+  enabled: false
+  # email_recipients: []
+  # slack_webhook_scope: monitoring-secrets
+  # slack_webhook_key: dev-alerts-webhook
