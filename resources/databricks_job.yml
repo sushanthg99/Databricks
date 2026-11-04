@@ -62,49 +62,10 @@ resources:
           default: ""                   # Empty = run all active datasets
 
       # -----------------------------------------------------------------------
-      # Job Cluster
+      # Serverless Compute
+      # This workspace is configured for serverless-only compute.
+      # No job_clusters block needed — tasks use serverless automatically.
       # -----------------------------------------------------------------------
-      # IMPORTANT:
-      #   - Do NOT hardcode cluster IDs (instance-specific, not portable).
-      #   - Use a Cluster Policy for governance and cost control.
-      #   - The cluster spec below is a TEMPLATE — fill in actual values
-      #     via Cluster Policy or bundle variable overrides per target.
-      #
-      # TODO: Replace <PLACEHOLDER_*> with values from your workspace.
-      # TODO: Confirm node type, autoscale min/max, and DBR version with the team.
-      # -----------------------------------------------------------------------
-      job_clusters:
-        - job_cluster_key: ingestion_cluster
-          new_cluster:
-            # Databricks Runtime version — use LTS release for stability
-            spark_version: 13.3.x-scala2.12          # TODO: Update to latest LTS
-            node_type_id: <PLACEHOLDER_NODE_TYPE_ID>  # e.g. i3.xlarge, m5d.2xlarge
-            num_workers: 2                             # TODO: Tune per data volume
-
-            # TODO: Replace with actual Cluster Policy ID from your workspace
-            # policy_id: <PLACEHOLDER_CLUSTER_POLICY_ID>
-
-            # Auto-termination after 30 minutes of inactivity
-            autotermination_minutes: 30
-
-            # AWS attributes — IAM role for S3 access (no access keys)
-            aws_attributes:
-              instance_profile_arn: <PLACEHOLDER_IAM_INSTANCE_PROFILE_ARN>
-              # availability: SPOT_WITH_FALLBACK   # Uncomment for cost optimisation
-              # first_on_demand: 1
-
-            # Spark configuration
-            spark_conf:
-              spark.databricks.delta.preview.enabled: "true"
-              spark.sql.extensions: io.delta.sql.DeltaSparkSessionExtension
-              spark.sql.catalog.spark_catalog: org.apache.spark.sql.delta.catalog.DeltaCatalog
-              # TODO: Add Unity Catalog config if not already set at workspace level
-              # spark.databricks.unityCatalog.enabled: "true"
-
-            # Log delivery (optional)
-            # cluster_log_conf:
-            #   dbfs:
-            #     destination: dbfs:/cluster-logs/${bundle.target}/ingestion
 
       # -----------------------------------------------------------------------
       # Tasks
@@ -120,7 +81,6 @@ resources:
           description: >
             Load YAML dataset configurations into Unity Catalog metadata tables
             using hash-based deduplication (skip unchanged configs).
-          job_cluster_key: ingestion_cluster
 
           notebook_task:
             notebook_path: ${workspace.file_path}/notebooks/bronze_ingestion_notebook
@@ -147,7 +107,6 @@ resources:
             Ingest active datasets from AWS S3 into Delta Bronze tables using
             Auto Loader (incremental) or batch overwrite (full load) based on
             each dataset's ingestion_config.
-          job_cluster_key: ingestion_cluster
           depends_on:
             - task_key: register_metadata
 

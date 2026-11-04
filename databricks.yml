@@ -45,10 +45,7 @@ variables:
 # Workspace sync — files deployed to workspace
 # -----------------------------------------------------------------------------
 workspace:
-  # PLACEHOLDER: Set your workspace host per target (see targets section below)
-  # host: https://<PLACEHOLDER_WORKSPACE_HOST>.azuredatabricks.net
-
-  root_path: /Workspace/Shared/dynamic-databricks-ingestion/${bundle.target}
+  root_path: ~/.bundle/${bundle.name}/${bundle.target}
 
   # Files to sync to the workspace
   file_path: ${workspace.root_path}/files
@@ -85,7 +82,7 @@ targets:
     mode: development
     default: true
     workspace:
-      host: <PLACEHOLDER_DEV_WORKSPACE_HOST>
+      host: https://dbc-15fc2096-517b.cloud.databricks.com
       # Token resolved from DATABRICKS_TOKEN env var or ~/.databrickscfg
     variables:
       catalog_name: dev_catalog
