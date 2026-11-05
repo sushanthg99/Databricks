@@ -3,27 +3,19 @@
 # Dynamic Databricks Ingestion Framework
 # =============================================================================
 #
-# TRIGGERS:
-#   - Push to main branch       → deploys bundle + syncs Repos UI
-#   - Pull request to main      → validates bundle only (no deploy)
-#   - Manual trigger            → deploy to any target (dev/uat/prod)
-#
-# SECRETS REQUIRED (set in GitHub → Settings → Secrets → Actions):
-#   DATABRICKS_HOST             → https://dbc-15fc2096-517b.cloud.databricks.com
-#   DATABRICKS_TOKEN            → your Databricks personal access token
-#   DATABRICKS_REPO_ID          → 480168241926967  (Repos UI sync)
-#
+# SECRETS REQUIRED (GitHub → Settings → Secrets → Actions):
+#   DATABRICKS_HOST       → https://dbc-15fc2096-517b.cloud.databricks.com
+#   DATABRICKS_TOKEN      → dapi...
+#   DATABRICKS_USER_EMAIL → sushanth.gangadhara@blumetra.com
 # =============================================================================
 
 name: Deploy to Databricks
 
 on:
   push:
-    branches:
-      - main
+    branches: [ main ]
   pull_request:
-    branches:
-      - main
+    branches: [ main ]
   workflow_dispatch:
     inputs:
       target:
@@ -31,12 +23,8 @@ on:
         required: true
         default: dev
         type: choice
-        options:
-          - dev
-          - uat
-          - prod
+        options: [ dev, uat, prod ]
 
-# Cancel any in-progress run for the same branch
 concurrency:
   group: deploy-${{ github.ref }}
   cancel-in-progress: true
@@ -44,45 +32,39 @@ concurrency:
 jobs:
 
   # ---------------------------------------------------------------------------
-  # JOB 1: Validate (runs on every push and PR)
+  # JOB 1: Validate
   # ---------------------------------------------------------------------------
   validate:
     name: Validate Bundle
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Install Databricks CLI
-        run: |
-          curl -fsSL https://raw.githubusercontent.com/databricks/setup-cli/main/install.sh | sh
+        run: curl -fsSL https://raw.githubusercontent.com/databricks/setup-cli/main/install.sh | sh
 
       - name: Validate bundle
         env:
           DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
           DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
-        run: |
-          databricks bundle validate --target dev
+        run: databricks bundle validate --target dev
 
   # ---------------------------------------------------------------------------
-  # JOB 2: Deploy (runs only on push to main or manual trigger)
+  # JOB 2: Deploy + Sync Repos UI
   # ---------------------------------------------------------------------------
   deploy:
-    name: Deploy Bundle + Sync Repo
+    name: Deploy + Sync Repos UI
     runs-on: ubuntu-latest
     needs: validate
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Install Databricks CLI
-        run: |
-          curl -fsSL https://raw.githubusercontent.com/databricks/setup-cli/main/install.sh | sh
+        run: curl -fsSL https://raw.githubusercontent.com/databricks/setup-cli/main/install.sh | sh
 
-      - name: Set deployment target
+      - name: Set target
         id: target
         run: |
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
@@ -96,32 +78,46 @@ jobs:
           DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
           DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
         run: |
-          echo "Deploying to target: ${{ steps.target.outputs.target }}"
+          echo "Deploying to: ${{ steps.target.outputs.target }}"
           databricks bundle deploy --target ${{ steps.target.outputs.target }}
 
-      - name: Sync Databricks Repo UI
+      - name: Sync Databricks Repos UI
         env:
           DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
           DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
         run: |
-          echo "Syncing Repos UI..."
-          # Update the existing repo if it exists
-          databricks repos update ${{ secrets.DATABRICKS_REPO_ID }} \
-            --branch main || \
-          # If update fails (repo deleted), re-create it
-          databricks repos create \
-            https://github.com/${{ github.repository }}.git \
-            gitHub \
-            --path "/Repos/${{ secrets.DATABRICKS_USER_EMAIL }}/Databricks"
+          REPO_PATH="/Repos/${{ secrets.DATABRICKS_USER_EMAIL }}/Databricks"
+          REPO_URL="https://github.com/${{ github.repository }}.git"
 
-      - name: Print deployment summary
+          echo "Syncing Repos UI at: $REPO_PATH"
+
+          # Find existing repo ID
+          REPO_ID=$(databricks repos list --output json 2>/dev/null | \
+            python3 -c "
+          import sys, json
+          repos = json.load(sys.stdin)
+          for r in repos:
+              if r.get('path') == '$REPO_PATH':
+                  print(r['id'])
+                  break
+          " 2>/dev/null || echo "")
+
+          if [ -n "$REPO_ID" ]; then
+            echo "Found existing repo ID: $REPO_ID — deleting..."
+            databricks repos delete "$REPO_ID" || true
+            sleep 3
+          fi
+
+          echo "Creating fresh repo from main branch..."
+          databricks repos create "$REPO_URL" gitHub --path "$REPO_PATH"
+          echo "✅ Repos UI synced successfully"
+
+      - name: Summary
         run: |
-          echo "========================================"
-          echo "  DEPLOYMENT COMPLETE"
-          echo "========================================"
-          echo "  Repo     : ${{ github.repository }}"
-          echo "  Branch   : ${{ github.ref_name }}"
-          echo "  Commit   : ${{ github.sha }}"
-          echo "  Target   : ${{ steps.target.outputs.target }}"
-          echo "  Triggered: ${{ github.event_name }}"
-          echo "========================================"
+          echo "### ✅ Deployment Complete" >> $GITHUB_STEP_SUMMARY
+          echo "| Item | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| Target | ${{ steps.target.outputs.target }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Commit | ${{ github.sha }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Branch | ${{ github.ref_name }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Triggered by | ${{ github.event_name }} |" >> $GITHUB_STEP_SUMMARY
