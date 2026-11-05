@@ -73,7 +73,6 @@ sync:
     - notebooks/**
     - sql/**
     - docs/**
-    - demo/**
   exclude:
     - "**/__pycache__/**"
     - "**/*.pyc"
