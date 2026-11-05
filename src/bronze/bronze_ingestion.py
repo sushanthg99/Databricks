@@ -5,50 +5,20 @@ Bronze layer top-level ingestion orchestrator.
 
 Responsibilities
 ----------------
-1. Accept job/notebook parameters:
-   - ``source_system``: filter datasets by source (e.g., ``ecommerce``)
-   - ``environment``: target environment (``dev``, ``uat``, ``prod``)
-   - ``run_mode``: ``incremental``, ``full``, or ``metadata_only``
-   - ``dataset_name``: optional — run a single dataset instead of all active ones
-2. Load environment configuration from ``configs/environments/{env}.yml``.
-3. Query Unity Catalog metadata tables to get the list of active datasets
-   for the given ``source_system`` and ``environment``.
-4. Optionally run the metadata loader first (when ``run_mode=metadata_only``
-   or as a pre-step before ingestion).
-5. Loop through each active dataset and call ``BronzeLoader.load()``.
-6. Track per-dataset execution results.
-7. Write a summary row to ``ingestion_runtime_state`` for each dataset.
-8. A single dataset failure must NOT abort the loop — log and continue.
-
-Usage (from notebook)
----------------------
-    from src.bronze.bronze_ingestion import BronzeIngestion
-
-    ingestion = BronzeIngestion(spark=spark, dbutils=dbutils)
-    ingestion.run(
-        source_system="ecommerce",
-        environment="dev",
-        run_mode="incremental",
-    )
-
-Parameters (Databricks widget / job parameter)
-----------------------------------------------
-source_system   : str  — required
-environment     : str  — required (dev | uat | prod)
-run_mode        : str  — optional, default "incremental"
-dataset_name    : str  — optional, run a single named dataset only
-
-TODO (Phase 1)
---------------
-- Implement ``_query_active_datasets()`` SQL query.
-- Implement ``_update_runtime_state()`` INSERT into ingestion_runtime_state.
-- Add backfill run_mode support (OQ-011).
+1. Accept job/notebook parameters (source_system, environment, run_mode, dataset_name).
+2. Load environment configuration from configs/environments/{env}.yml.
+3. Query Unity Catalog metadata tables for active Bronze datasets.
+4. Loop through each dataset and call BronzeLoader.load().
+5. Write per-dataset run metrics to ingestion_runtime_state.
+6. A single dataset failure must NOT abort the loop — log and continue.
 """
 
 from __future__ import annotations
 
 import logging
 import time
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -67,14 +37,13 @@ class BronzeIngestion:
     Parameters
     ----------
     spark : SparkSession
-        Active Spark session.
     dbutils : object
-        Databricks ``dbutils`` object for widget access and secrets.
-        Pass ``None`` when running outside Databricks (e.g., unit tests).
+        Databricks dbutils for secrets and widget access.
+        Pass None when running unit tests.
     """
 
     def __init__(self, spark: "SparkSession", dbutils: Any = None) -> None:
-        self.spark = spark
+        self.spark   = spark
         self.dbutils = dbutils
         self._env_config: dict[str, Any] = {}
 
@@ -84,10 +53,13 @@ class BronzeIngestion:
 
     def run(
         self,
-        source_system: str,
-        environment: str,
-        run_mode: str = "incremental",
-        dataset_name: str | None = None,
+        source_system:   str,
+        environment:     str,
+        run_mode:        str = "incremental",
+        dataset_name:    str | None = None,
+        catalog_name:    str | None = None,
+        metadata_schema: str | None = None,
+        env_config:      dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """
         Execute Bronze ingestion for active datasets in the given source system.
@@ -95,18 +67,24 @@ class BronzeIngestion:
         Parameters
         ----------
         source_system : str
-            Source system identifier. Filters ``dataset_registry`` by this value.
+            Filters dataset_registry by source_system value.
         environment : str
-            Target environment (``dev``, ``uat``, ``prod``).
+            Target environment (dev | uat | prod).
         run_mode : str
-            Ingestion mode: ``incremental``, ``full``, or ``metadata_only``.
+            incremental | full | metadata_only
         dataset_name : str, optional
-            If provided, only this dataset is processed (useful for reruns).
+            Run a single named dataset only.
+        catalog_name : str, optional
+            Override catalog from env config (injected by job parameter).
+        metadata_schema : str, optional
+            Override metadata schema from env config.
+        env_config : dict, optional
+            Pre-loaded env config dict (injected by notebook, avoids double load).
 
         Returns
         -------
         dict[str, Any]
-            Run summary: ``{total, succeeded, failed, skipped, duration_seconds}``
+            ``{total, succeeded, failed, skipped, duration_seconds}``
         """
         start_time = time.time()
         logger.info(
@@ -114,18 +92,32 @@ class BronzeIngestion:
             source_system, environment, run_mode,
         )
 
-        self._env_config = self._load_env_config(environment)
-        catalog = self._env_config["unity_catalog"]["catalog_name"]
-        metadata_schema = self._env_config["unity_catalog"]["metadata_schema"]
+        # Load environment config — use injected if provided, else load from file
+        if env_config:
+            self._env_config = env_config
+        else:
+            self._env_config = self._load_env_config(environment)
 
-        # Optional: run metadata loader as a pre-step
+        # Allow job parameter overrides to take precedence
+        catalog = (
+            catalog_name
+            or self._env_config.get("unity_catalog", {}).get("catalog_name", "dev_catalog")
+        )
+        schema = (
+            metadata_schema
+            or self._env_config.get("unity_catalog", {}).get("metadata_schema", "ingestion_metadata")
+        )
+
+        logger.info("Using catalog=%s | metadata_schema=%s", catalog, schema)
+
+        # Metadata-only run — register YAML configs, no ingestion
         if run_mode == "metadata_only":
-            return self._run_metadata_only(catalog, metadata_schema, environment)
+            return self._run_metadata_only(catalog, schema, environment)
 
-        # Query active datasets from metadata tables
+        # Query active datasets from Unity Catalog
         datasets = self._query_active_datasets(
             catalog=catalog,
-            metadata_schema=metadata_schema,
+            metadata_schema=schema,
             source_system=source_system,
             environment=environment,
             dataset_name_filter=dataset_name,
@@ -136,19 +128,25 @@ class BronzeIngestion:
                 "No active datasets found | source_system=%s | env=%s",
                 source_system, environment,
             )
-            return {"total": 0, "succeeded": 0, "failed": 0, "skipped": 0,
-                    "duration_seconds": 0}
+            return {
+                "total": 0, "succeeded": 0,
+                "failed": 0, "skipped": 0,
+                "duration_seconds": 0,
+            }
 
         logger.info("Active datasets found: %d", len(datasets))
 
-        # Ingestion loop — failure of one dataset does NOT abort others
+        # Ingestion loop — one failure does NOT stop other datasets
         succeeded = failed = skipped = 0
+        run_id = str(uuid.uuid4())
+
         for dataset_cfg in datasets:
             result = self._ingest_one(
                 dataset_cfg=dataset_cfg,
                 run_mode=run_mode,
                 catalog=catalog,
-                metadata_schema=metadata_schema,
+                metadata_schema=schema,
+                run_id=run_id,
             )
             if result["status"] == "SUCCESS":
                 succeeded += 1
@@ -158,11 +156,11 @@ class BronzeIngestion:
                 failed += 1
 
         duration = round(time.time() - start_time, 2)
-        summary = {
-            "total": len(datasets),
-            "succeeded": succeeded,
-            "failed": failed,
-            "skipped": skipped,
+        summary  = {
+            "total":            len(datasets),
+            "succeeded":        succeeded,
+            "failed":           failed,
+            "skipped":          skipped,
             "duration_seconds": duration,
         }
         logger.info("BronzeIngestion complete | %s", summary)
@@ -174,35 +172,20 @@ class BronzeIngestion:
 
     def _ingest_one(
         self,
-        dataset_cfg: dict[str, Any],
-        run_mode: str,
-        catalog: str,
+        dataset_cfg:     dict[str, Any],
+        run_mode:        str,
+        catalog:         str,
         metadata_schema: str,
+        run_id:          str,
     ) -> dict[str, Any]:
         """
-        Ingest a single dataset and update its runtime state.
-
-        Parameters
-        ----------
-        dataset_cfg : dict[str, Any]
-            Merged dataset config from metadata tables.
-        run_mode : str
-            Ingestion mode override (``incremental`` | ``full``).
-        catalog : str
-            Unity Catalog catalog name.
-        metadata_schema : str
-            Metadata schema name.
-
-        Returns
-        -------
-        dict[str, Any]
-            ``{status, rows_ingested, error_message, duration_seconds}``
+        Ingest a single dataset, then write its result to ingestion_runtime_state.
+        Never raises — all exceptions are caught, logged, and returned as FAILED.
         """
-        from src.bronze.bronze_loader import BronzeLoader  # noqa: PLC0415
+        from src.bronze.bronze_loader import BronzeLoader
 
         dataset_name = dataset_cfg.get("dataset_name", "UNKNOWN")
-        start = time.time()
-
+        start        = time.time()
         logger.info("Processing dataset: %s", dataset_name)
 
         try:
@@ -213,22 +196,25 @@ class BronzeIngestion:
                 metadata_schema=metadata_schema,
             )
             result = loader.load(dataset_cfg=dataset_cfg, run_mode=run_mode)
-            result["duration_seconds"] = round(time.time() - start, 2)
 
         except Exception as exc:
-            logger.exception("Dataset ingestion failed: %s | error=%s", dataset_name, exc)
+            logger.exception(
+                "Dataset ingestion failed | dataset=%s | error=%s", dataset_name, exc
+            )
             result = {
-                "status": "FAILED",
+                "status":        "FAILED",
                 "rows_ingested": 0,
                 "error_message": str(exc),
-                "duration_seconds": round(time.time() - start, 2),
             }
+
+        result["duration_seconds"] = round(time.time() - start, 2)
 
         self._update_runtime_state(
             dataset_cfg=dataset_cfg,
             result=result,
             catalog=catalog,
             metadata_schema=metadata_schema,
+            run_id=run_id,
         )
         return result
 
@@ -238,33 +224,15 @@ class BronzeIngestion:
 
     def _run_metadata_only(
         self,
-        catalog: str,
+        catalog:         str,
         metadata_schema: str,
-        environment: str,
+        environment:     str,
     ) -> dict[str, Any]:
         """
-        Run only the metadata loader step — register YAML configs into
-        Unity Catalog without executing any ingestion.
-
-        Parameters
-        ----------
-        catalog : str
-        metadata_schema : str
-        environment : str
-
-        Returns
-        -------
-        dict[str, Any]
-            Metadata loader summary.
-
-        TODO
-        ----
-        Implement by instantiating MetadataLoader and calling load_from_file()
-        for each config file in configs/.
+        Register YAML configs into Unity Catalog metadata tables.
+        No ingestion is performed — only metadata MERGE operations.
         """
-        from ingestion_framework.metadata_service.metadata_loader import (  # noqa: PLC0415
-            MetadataLoader,
-        )
+        from ingestion_framework.metadata_service.metadata_loader import MetadataLoader
 
         loader = MetadataLoader(
             spark=self.spark,
@@ -273,142 +241,204 @@ class BronzeIngestion:
             environment=environment,
         )
 
+        # Resolve config path relative to this file
         config_path = Path(__file__).parents[2] / "configs" / "domain_config.yml"
         result = loader.load_from_file(config_path)
         logger.info("Metadata-only run complete | %s", result)
         return result
 
     # ------------------------------------------------------------------
-    # Metadata table queries
+    # Active dataset query
     # ------------------------------------------------------------------
 
     def _query_active_datasets(
         self,
-        catalog: str,
-        metadata_schema: str,
-        source_system: str,
-        environment: str,
-        dataset_name_filter: str | None = None,
+        catalog:              str,
+        metadata_schema:      str,
+        source_system:        str,
+        environment:          str,
+        dataset_name_filter:  str | None = None,
     ) -> list[dict[str, Any]]:
         """
-        Query Unity Catalog metadata tables for active Bronze datasets.
+        Query Unity Catalog for active Bronze datasets matching the given
+        source_system and environment.
 
-        Joins ``dataset_registry`` and ``ingestion_config`` to build a
-        merged configuration dict per dataset.
-
-        Parameters
-        ----------
-        catalog : str
-        metadata_schema : str
-        source_system : str
-        environment : str
-        dataset_name_filter : str, optional
-            Limit results to a single dataset name.
+        Joins dataset_registry + ingestion_config to produce one merged
+        config dict per dataset — ready to pass directly to AutoLoaderEngine.
 
         Returns
         -------
         list[dict[str, Any]]
-            List of merged dataset + ingestion config dicts.
-
-        TODO (Phase 1)
-        --------------
-        Implement SQL query:
-            SELECT dr.*, ic.*
-            FROM {catalog}.{metadata_schema}.dataset_registry dr
-            JOIN {catalog}.{metadata_schema}.ingestion_config ic
-              ON dr.dataset_id = ic.dataset_id
-            WHERE dr.source_system = '{source_system}'
-              AND dr.active = true
-              AND dr.data_tier = 'bronze'
-              AND ic.environment = '{environment}'
-              [AND dr.dataset_name = '{dataset_name_filter}']
+            One dict per active dataset with all ingestion config fields.
         """
-        logger.debug(
-            "_query_active_datasets() not yet implemented. Returning empty list."
+        name_filter_clause = (
+            f"AND dr.dataset_name = '{dataset_name_filter}'"
+            if dataset_name_filter else ""
         )
-        # TODO: Implement
-        # query = f"""
-        #     SELECT dr.dataset_id, dr.dataset_name, dr.source_system, dr.criticality,
-        #            ic.load_type, ic.ingestion_mode, ic.s3_bucket, ic.s3_path,
-        #            ic.format, ic.delimiter, ic.encoding, ic.header, ic.multiline,
-        #            ic.schema_location, ic.checkpoint_location,
-        #            ic.primary_keys, ic.watermark_column, ic.target_table
-        #     FROM {catalog}.{metadata_schema}.dataset_registry dr
-        #     JOIN {catalog}.{metadata_schema}.ingestion_config ic
-        #       ON dr.dataset_id = ic.dataset_id
-        #     WHERE dr.source_system = '{source_system}'
-        #       AND dr.active = true
-        #       AND dr.data_tier = 'bronze'
-        #       AND ic.environment = '{environment}'
-        # """
-        # if dataset_name_filter:
-        #     query += f" AND dr.dataset_name = '{dataset_name_filter}'"
-        # rows = self.spark.sql(query).collect()
-        # return [row.asDict() for row in rows]
-        return []
+
+        query = f"""
+            SELECT
+                dr.dataset_id,
+                dr.dataset_name,
+                dr.source_system,
+                dr.data_tier,
+                dr.criticality,
+                dr.pii,
+                ic.config_id,
+                ic.ingestion_mode,
+                ic.load_type,
+                ic.s3_bucket,
+                ic.s3_path,
+                ic.file_pattern,
+                ic.format,
+                ic.delimiter,
+                ic.encoding,
+                ic.header,
+                ic.multiline,
+                ic.schema_location,
+                ic.checkpoint_location,
+                ic.primary_keys,
+                ic.watermark_column,
+                ic.watermark_delay,
+                ic.frequency,
+                ic.target_table
+            FROM {catalog}.{metadata_schema}.dataset_registry  dr
+            JOIN {catalog}.{metadata_schema}.ingestion_config  ic
+              ON dr.dataset_id  = ic.dataset_id
+            WHERE dr.source_system = '{source_system}'
+              AND dr.active        = true
+              AND dr.data_tier     = 'bronze'
+              AND ic.environment   = '{environment}'
+              {name_filter_clause}
+            ORDER BY dr.dataset_name
+        """
+
+        logger.debug("Querying active datasets:\n%s", query)
+
+        try:
+            rows = self.spark.sql(query).collect()
+            datasets = [row.asDict() for row in rows]
+            logger.info(
+                "Found %d active dataset(s) | source_system=%s | env=%s",
+                len(datasets), source_system, environment,
+            )
+            return datasets
+
+        except Exception as exc:
+            logger.exception(
+                "Failed to query active datasets | source_system=%s | error=%s",
+                source_system, exc,
+            )
+            return []
+
+    # ------------------------------------------------------------------
+    # Runtime state update
+    # ------------------------------------------------------------------
 
     def _update_runtime_state(
         self,
-        dataset_cfg: dict[str, Any],
-        result: dict[str, Any],
-        catalog: str,
+        dataset_cfg:     dict[str, Any],
+        result:          dict[str, Any],
+        catalog:         str,
         metadata_schema: str,
+        run_id:          str,
     ) -> None:
         """
-        Append a run record to ``ingestion_runtime_state``.
+        Append one row to ingestion_runtime_state for this dataset run.
 
-        Parameters
-        ----------
-        dataset_cfg : dict[str, Any]
-        result : dict[str, Any]
-        catalog : str
-        metadata_schema : str
-
-        TODO (Phase 1)
-        --------------
-        Implement INSERT INTO {catalog}.{metadata_schema}.ingestion_runtime_state
-        with run_id, dataset_id, layer, status, rows_ingested, error_message, timestamps.
+        Uses INSERT INTO (append-only). One row per dataset per run.
+        Non-fatal — failure to write runtime state does not abort ingestion.
         """
-        logger.debug(
-            "_update_runtime_state() | dataset=%s | status=%s",
-            dataset_cfg.get("dataset_name"), result.get("status"),
-        )
-        # TODO: Implement
-        pass
+        runtime_table = f"{catalog}.{metadata_schema}.ingestion_runtime_state"
+        dataset_id    = dataset_cfg.get("dataset_id", "")
+        dataset_name  = dataset_cfg.get("dataset_name", "UNKNOWN")
+        now           = datetime.now(timezone.utc).isoformat()
+        status        = result.get("status", "FAILED")
+        rows_ingested = result.get("rows_ingested", 0)
+        duration      = result.get("duration_seconds", 0)
+        error_msg     = (result.get("error_message") or "").replace("'", "''")[:2000]
+        environment   = self._env_config.get("environment", "dev")
+
+        sql = f"""
+            INSERT INTO {runtime_table} (
+                run_id, dataset_id, environment, layer,
+                start_time, end_time, duration_seconds,
+                status, rows_ingested, rows_failed_dq,
+                source_file_count, error_message, created_at
+            ) VALUES (
+                '{run_id}',
+                '{dataset_id}',
+                '{environment}',
+                'bronze',
+                '{now}',
+                '{now}',
+                {duration},
+                '{status}',
+                {rows_ingested},
+                0,
+                {result.get("source_file_count", 0)},
+                '{error_msg}',
+                '{now}'
+            )
+        """
+
+        try:
+            self.spark.sql(sql)
+            logger.debug(
+                "Runtime state written | dataset=%s | status=%s | rows=%d",
+                dataset_name, status, rows_ingested,
+            )
+        except Exception as exc:
+            # Non-fatal: log warning but do not raise — ingestion already done
+            logger.warning(
+                "Failed to write runtime state | dataset=%s | error=%s",
+                dataset_name, exc,
+            )
 
     # ------------------------------------------------------------------
-    # Environment config
+    # Environment config loader
     # ------------------------------------------------------------------
 
     def _load_env_config(self, environment: str) -> dict[str, Any]:
         """
-        Load the environment-specific YAML configuration.
-
-        Parameters
-        ----------
-        environment : str
-            Environment name (``dev``, ``uat``, ``prod``).
-
-        Returns
-        -------
-        dict[str, Any]
-            Parsed environment config dict.
-
-        Raises
-        ------
-        FileNotFoundError
-            If the environment config file does not exist.
+        Load environment YAML config from configs/environments/{env}.yml.
+        Tries the path relative to this file first, then falls back to
+        the Databricks workspace bundle path.
         """
-        config_path = (
+        # Path relative to this source file (local / bundle)
+        local_path = (
             Path(__file__).parents[2]
-            / "configs"
-            / "environments"
-            / f"{environment}.yml"
+            / "configs" / "environments" / f"{environment}.yml"
         )
-        if not config_path.exists():
-            raise FileNotFoundError(
-                f"Environment config not found: {config_path}. "
-                f"Valid environments: dev, uat, prod"
+
+        if local_path.exists():
+            config_path = local_path
+        else:
+            # Databricks workspace path when running from synced bundle
+            config_path = Path(
+                f"/Workspace/Users/sushanth.gangadhara@blumetra.com"
+                f"/.bundle/dynamic-databricks-ingestion/{environment}/files"
+                f"/configs/environments/{environment}.yml"
             )
-        with config_path.open("r", encoding="utf-8") as fh:
-            return yaml.safe_load(fh)
+
+        if not Path(config_path).exists():
+            logger.warning(
+                "Environment config not found at %s — using defaults", config_path
+            )
+            return {
+                "environment": environment,
+                "unity_catalog": {
+                    "catalog_name":    f"{environment}_catalog",
+                    "metadata_schema": "ingestion_metadata",
+                },
+                "ingestion": {
+                    "schema_evolution_mode": "addNewColumns",
+                    "max_files_per_trigger": 1000,
+                },
+            }
+
+        with open(config_path, "r", encoding="utf-8") as fh:
+            config = yaml.safe_load(fh)
+
+        logger.info("Environment config loaded from: %s", config_path)
+        return config
