@@ -263,13 +263,137 @@ import sys
 if BUNDLE_PATH not in sys.path:
     sys.path.insert(0, BUNDLE_PATH)
 
-from pathlib import Path
+import yaml
 from ingestion_framework.metadata_service.metadata_loader import MetadataLoader
 
-demo_config_path = Path(f"{BUNDLE_PATH}/demo/demo_config.yml")
+# Embed demo config inline — avoids Path.exists() issues on serverless Repos
+DEMO_CONFIG_YAML = f"""
+source_system: ecommerce
+environment: dev
 
-print(f"Loading metadata from : {demo_config_path}")
-print(f"Target catalog.schema : {CATALOG}.{METADATA_SCHEMA}")
+datasets:
+  - dataset_name: orders
+    version: "1.0"
+    dataset_type: transactional
+    data_tier: bronze
+    business_description: Customer order transactions demo data.
+    criticality: high
+    classification: internal
+    pii: false
+    active: true
+    source_type: volume
+    volume_path: {VOLUME_ORDERS}
+    file_pattern: orders.tsv
+    format: tsv
+    delimiter: "\\t"
+    encoding: UTF-8
+    header: true
+    ingestion_mode: batch
+    load_type: full
+    schema_location: {VOLUME_BASE}/schemas/orders/
+    checkpoint_location: {VOLUME_BASE}/checkpoints/orders/
+    primary_keys: [order_id]
+    watermark:
+      column: order_timestamp
+      delay: "2 hours"
+    frequency: daily
+    tags:
+      domain: ecommerce
+      owner: data-engineering-team
+      retention_days: "365"
+      sensitivity: standard
+      demo: "true"
+    data_quality:
+      - rule_name: order_id_not_null
+        rule_type: not_null
+        column_name: order_id
+        threshold_pct: 100.0
+        fail_on_breach: true
+      - rule_name: order_amount_positive
+        rule_type: range
+        column_name: order_amount
+        rule_expression: "order_amount > 0"
+        threshold_pct: 100.0
+        fail_on_breach: true
+
+  - dataset_name: customers
+    version: "1.0"
+    dataset_type: reference
+    data_tier: bronze
+    business_description: Customer master data demo.
+    criticality: high
+    classification: confidential
+    pii: true
+    active: true
+    source_type: volume
+    volume_path: {VOLUME_CUSTOMERS}
+    file_pattern: customers.tsv
+    format: tsv
+    delimiter: "\\t"
+    encoding: UTF-8
+    header: true
+    ingestion_mode: batch
+    load_type: full
+    schema_location: {VOLUME_BASE}/schemas/customers/
+    checkpoint_location: {VOLUME_BASE}/checkpoints/customers/
+    primary_keys: [customer_id]
+    watermark:
+      column: registration_date
+      delay: "0 hours"
+    frequency: daily
+    tags:
+      domain: ecommerce
+      owner: data-engineering-team
+      retention_days: "730"
+      sensitivity: pii
+      demo: "true"
+    data_quality:
+      - rule_name: customer_id_not_null
+        rule_type: not_null
+        column_name: customer_id
+        threshold_pct: 100.0
+        fail_on_breach: true
+
+  - dataset_name: products
+    version: "1.0"
+    dataset_type: reference
+    data_tier: bronze
+    business_description: Product catalogue demo data.
+    criticality: medium
+    classification: internal
+    pii: false
+    active: true
+    source_type: volume
+    volume_path: {VOLUME_PRODUCTS}
+    file_pattern: products.tsv
+    format: tsv
+    delimiter: "\\t"
+    encoding: UTF-8
+    header: true
+    ingestion_mode: batch
+    load_type: full
+    schema_location: {VOLUME_BASE}/schemas/products/
+    checkpoint_location: {VOLUME_BASE}/checkpoints/products/
+    primary_keys: [product_id]
+    watermark:
+      column: last_updated
+      delay: "1 hour"
+    frequency: daily
+    tags:
+      domain: ecommerce
+      owner: product-team
+      retention_days: "365"
+      sensitivity: standard
+      demo: "true"
+    data_quality:
+      - rule_name: product_id_not_null
+        rule_type: not_null
+        column_name: product_id
+        threshold_pct: 100.0
+        fail_on_breach: true
+"""
+
+print(f"Registering metadata into : {CATALOG}.{METADATA_SCHEMA}")
 print("-" * 60)
 
 loader = MetadataLoader(
@@ -279,7 +403,12 @@ loader = MetadataLoader(
     environment=ENVIRONMENT,
 )
 
-result = loader.load_from_file(demo_config_path)
+# Parse inline YAML and load directly — no file path needed
+raw = yaml.safe_load(DEMO_CONFIG_YAML)
+result = loader.load_from_list(
+    raw["datasets"],
+    source_system=raw["source_system"]
+)
 
 print("\n✓ Metadata registration complete")
 print(f"  Total     : {result['total']}")
@@ -301,7 +430,7 @@ spark.sql(f"""
 print("── ingestion_config ───────────────────────────────────────────")
 spark.sql(f"""
     SELECT dataset_id, environment, source_type, load_type,
-           format, volume_path, target_table
+           format, target_table
     FROM {CATALOG}.{METADATA_SCHEMA}.ingestion_config
     ORDER BY dataset_id
 """).show(truncate=False)
