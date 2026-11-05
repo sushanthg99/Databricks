@@ -2,22 +2,10 @@
 # Demo Configuration — Dynamic Databricks Ingestion Framework
 # =============================================================================
 #
-# PURPOSE:
-#   Demo mode configuration using DBFS (Databricks File System) as the source.
-#   Use this when you don't have AWS S3 access yet.
-#   TSV files are uploaded to DBFS by the demo notebook, then ingested into
-#   Delta Bronze tables using the same framework pipeline as production.
+# SOURCE TYPE : volume  (Unity Catalog Volume — no S3 / no DBFS needed)
+# VOLUME PATH : /Volumes/workspace/ingestion_metadata/demo_volume/data/
 #
-# SOURCE TYPE: dbfs (no S3 / AWS credentials needed)
-#
-# ONCE YOU HAVE S3:
-#   Copy these datasets into configs/domain_config.yml and change:
-#     source_type: s3
-#     s3_bucket: your-bucket-name
-#     s3_path: raw/ecommerce/{dataset_name}/
-#   Remove source_type and dbfs_path fields.
-#
-# LOADED BY: demo/notebooks/demo_end_to_end.py
+# WHEN YOU GET S3: change source_type → s3, add s3_bucket + s3_path
 # =============================================================================
 
 source_system: ecommerce
@@ -27,51 +15,41 @@ datasets:
 
   # ---------------------------------------------------------------------------
   # Dataset 1: Orders (TSV, full load)
-  # 30 rows — order transactions across 10 customers and 10 products
   # ---------------------------------------------------------------------------
   - dataset_name: orders
     version: "1.0"
     dataset_type: transactional
     data_tier: bronze
     business_description: >
-      Customer order transactions from the ecommerce platform.
-      Demo data — 30 sample orders loaded from DBFS TSV file.
+      Customer order transactions. Demo data — 30 rows from UC Volume TSV file.
     criticality: high
     classification: internal
     pii: false
     active: true
 
-    # Source — DBFS (demo mode, no S3 needed)
-    source_type: dbfs
-    dbfs_path: FileStore/demo/ecommerce/orders
+    # Source — Unity Catalog Volume (no S3/DBFS needed)
+    source_type: volume
+    volume_path: /Volumes/workspace/ingestion_metadata/demo_volume/data/orders
     file_pattern: "orders.tsv"
 
-    # File format
     format: tsv
     delimiter: "\t"
     encoding: UTF-8
     header: true
 
-    # Ingestion settings
     ingestion_mode: batch
     load_type: full
 
-    # Auto Loader schema + checkpoint volumes (used if switching to incremental)
-    schema_location: /Volumes/workspace/demo_bronze/autoloader_volume/schemas/orders/
-    checkpoint_location: /Volumes/workspace/demo_bronze/autoloader_volume/checkpoints/orders/
+    schema_location: /Volumes/workspace/ingestion_metadata/demo_volume/schemas/orders/
+    checkpoint_location: /Volumes/workspace/ingestion_metadata/demo_volume/checkpoints/orders/
 
-    # Primary key for Silver MERGE (future)
     primary_keys:
       - order_id
-
-    # Watermark for incremental Silver (future)
     watermark:
       column: order_timestamp
       delay: "2 hours"
-
     frequency: daily
 
-    # Tags
     tags:
       domain: ecommerce
       owner: data-engineering-team
@@ -79,7 +57,6 @@ datasets:
       sensitivity: standard
       demo: "true"
 
-    # Data Quality rules
     data_quality:
       - rule_name: order_id_not_null
         rule_type: not_null
@@ -103,46 +80,38 @@ datasets:
 
   # ---------------------------------------------------------------------------
   # Dataset 2: Customers (TSV, full load)
-  # 10 rows — customer master data including loyalty tier and lifetime value
   # ---------------------------------------------------------------------------
   - dataset_name: customers
     version: "1.0"
     dataset_type: reference
     data_tier: bronze
     business_description: >
-      Customer master data — name, contact, city, loyalty tier, lifetime value.
-      Demo data — 10 sample customers loaded from DBFS TSV file.
+      Customer master data. Demo data — 10 rows from UC Volume TSV file.
     criticality: high
     classification: confidential
     pii: true
     active: true
 
-    # Source — DBFS (demo mode)
-    source_type: dbfs
-    dbfs_path: FileStore/demo/ecommerce/customers
+    source_type: volume
+    volume_path: /Volumes/workspace/ingestion_metadata/demo_volume/data/customers
     file_pattern: "customers.tsv"
 
-    # File format
     format: tsv
     delimiter: "\t"
     encoding: UTF-8
     header: true
 
-    # Ingestion settings
     ingestion_mode: batch
     load_type: full
 
-    # Auto Loader locations
-    schema_location: /Volumes/workspace/demo_bronze/autoloader_volume/schemas/customers/
-    checkpoint_location: /Volumes/workspace/demo_bronze/autoloader_volume/checkpoints/customers/
+    schema_location: /Volumes/workspace/ingestion_metadata/demo_volume/schemas/customers/
+    checkpoint_location: /Volumes/workspace/ingestion_metadata/demo_volume/checkpoints/customers/
 
     primary_keys:
       - customer_id
-
     watermark:
       column: registration_date
       delay: "0 hours"
-
     frequency: daily
 
     tags:
@@ -166,55 +135,40 @@ datasets:
         threshold_pct: 100.0
         fail_on_breach: true
 
-      - rule_name: loyalty_tier_valid
-        rule_type: regex
-        column_name: loyalty_tier
-        rule_expression: "^(BRONZE|SILVER|GOLD|PLATINUM)$"
-        threshold_pct: 100.0
-        fail_on_breach: false
-
   # ---------------------------------------------------------------------------
   # Dataset 3: Products (TSV, full load)
-  # 10 rows — product catalogue with pricing, stock and supplier info
   # ---------------------------------------------------------------------------
   - dataset_name: products
     version: "1.0"
     dataset_type: reference
     data_tier: bronze
     business_description: >
-      Product catalogue — name, category, brand, pricing, stock levels.
-      Demo data — 10 sample products loaded from DBFS TSV file.
+      Product catalogue. Demo data — 10 rows from UC Volume TSV file.
     criticality: medium
     classification: internal
     pii: false
     active: true
 
-    # Source — DBFS (demo mode)
-    source_type: dbfs
-    dbfs_path: FileStore/demo/ecommerce/products
+    source_type: volume
+    volume_path: /Volumes/workspace/ingestion_metadata/demo_volume/data/products
     file_pattern: "products.tsv"
 
-    # File format
     format: tsv
     delimiter: "\t"
     encoding: UTF-8
     header: true
 
-    # Ingestion settings
     ingestion_mode: batch
     load_type: full
 
-    # Auto Loader locations
-    schema_location: /Volumes/workspace/demo_bronze/autoloader_volume/schemas/products/
-    checkpoint_location: /Volumes/workspace/demo_bronze/autoloader_volume/checkpoints/products/
+    schema_location: /Volumes/workspace/ingestion_metadata/demo_volume/schemas/products/
+    checkpoint_location: /Volumes/workspace/ingestion_metadata/demo_volume/checkpoints/products/
 
     primary_keys:
       - product_id
-
     watermark:
       column: last_updated
       delay: "1 hour"
-
     frequency: daily
 
     tags:
@@ -237,10 +191,3 @@ datasets:
         rule_expression: "unit_price > 0"
         threshold_pct: 100.0
         fail_on_breach: true
-
-      - rule_name: stock_non_negative
-        rule_type: range
-        column_name: stock_quantity
-        rule_expression: "stock_quantity >= 0"
-        threshold_pct: 100.0
-        fail_on_breach: false

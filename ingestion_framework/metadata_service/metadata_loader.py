@@ -319,6 +319,8 @@ class MetadataLoader:
         environment     = self.environment
         ingestion_mode  = cfg.get("ingestion_mode", "auto_loader")
         load_type       = cfg.get("load_type", "incremental")
+        source_type     = cfg.get("source_type", "s3")
+        volume_path     = cfg.get("volume_path", "")
         s3_bucket       = cfg.get("s3_bucket", "")
         s3_path         = cfg.get("s3_path", "")
         file_pattern    = cfg.get("file_pattern", "")
@@ -338,8 +340,6 @@ class MetadataLoader:
         frequency       = cfg.get("frequency", "daily")
         config_hash     = cfg["config_hash"]
 
-        # Build target table name:
-        # {catalog}.{source_system}_{tier}.{dataset_name}
         source_system = cfg.get("source_system", "")
         data_tier     = cfg.get("data_tier", "bronze")
         dataset_name  = cfg["dataset_name"]
@@ -354,6 +354,8 @@ class MetadataLoader:
                 '{environment}'     AS environment,
                 '{ingestion_mode}'  AS ingestion_mode,
                 '{load_type}'       AS load_type,
+                '{source_type}'     AS source_type,
+                '{volume_path}'     AS volume_path,
                 '{s3_bucket}'       AS s3_bucket,
                 '{s3_path}'         AS s3_path,
                 '{file_pattern}'    AS file_pattern,
@@ -375,34 +377,38 @@ class MetadataLoader:
         ON target.dataset_id   = source.dataset_id
        AND target.environment  = source.environment
         WHEN MATCHED THEN UPDATE SET
-            target.ingestion_mode   = source.ingestion_mode,
-            target.load_type        = source.load_type,
-            target.s3_bucket        = source.s3_bucket,
-            target.s3_path          = source.s3_path,
-            target.file_pattern     = source.file_pattern,
-            target.format           = source.format,
-            target.delimiter        = source.delimiter,
-            target.encoding         = source.encoding,
-            target.header           = source.header,
-            target.multiline        = source.multiline,
-            target.schema_location  = source.schema_location,
-            target.checkpoint_location = source.checkpoint_location,
-            target.primary_keys     = source.primary_keys,
-            target.watermark_column = source.watermark_column,
-            target.watermark_delay  = source.watermark_delay,
-            target.frequency        = source.frequency,
-            target.target_table     = source.target_table,
-            target.config_hash      = source.config_hash,
-            target.updated_at       = source.updated_at
+            target.ingestion_mode       = source.ingestion_mode,
+            target.load_type            = source.load_type,
+            target.source_type          = source.source_type,
+            target.volume_path          = source.volume_path,
+            target.s3_bucket            = source.s3_bucket,
+            target.s3_path              = source.s3_path,
+            target.file_pattern         = source.file_pattern,
+            target.format               = source.format,
+            target.delimiter            = source.delimiter,
+            target.encoding             = source.encoding,
+            target.header               = source.header,
+            target.multiline            = source.multiline,
+            target.schema_location      = source.schema_location,
+            target.checkpoint_location  = source.checkpoint_location,
+            target.primary_keys         = source.primary_keys,
+            target.watermark_column     = source.watermark_column,
+            target.watermark_delay      = source.watermark_delay,
+            target.frequency            = source.frequency,
+            target.target_table         = source.target_table,
+            target.config_hash          = source.config_hash,
+            target.updated_at           = source.updated_at
         WHEN NOT MATCHED THEN INSERT (
             config_id, dataset_id, environment, ingestion_mode, load_type,
-            s3_bucket, s3_path, file_pattern, format, delimiter, encoding,
-            header, multiline, schema_location, checkpoint_location,
-            primary_keys, watermark_column, watermark_delay,
-            frequency, target_table, config_hash, created_at, updated_at
+            source_type, volume_path, s3_bucket, s3_path, file_pattern,
+            format, delimiter, encoding, header, multiline,
+            schema_location, checkpoint_location, primary_keys,
+            watermark_column, watermark_delay, frequency,
+            target_table, config_hash, created_at, updated_at
         ) VALUES (
             source.config_id, source.dataset_id, source.environment,
             source.ingestion_mode, source.load_type,
+            source.source_type, source.volume_path,
             source.s3_bucket, source.s3_path, source.file_pattern,
             source.format, source.delimiter, source.encoding,
             source.header, source.multiline,

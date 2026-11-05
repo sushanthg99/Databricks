@@ -15,9 +15,10 @@ Responsibilities
 
 Supported source types
 ----------------------
-- dbfs  : dbfs:/FileStore/...  — Databricks File System (demo / no S3)
-- s3    : s3://bucket/path/    — AWS S3 (production)
-- abfss : abfss://...          — Azure Data Lake (future)
+- volume: /Volumes/catalog/schema/vol/path/ — Unity Catalog Volume (demo)
+- dbfs  : dbfs:/FileStore/...               — Databricks File System (legacy)
+- s3    : s3://bucket/path/                 — AWS S3 (production)
+- abfss : abfss://...                       — Azure Data Lake (future)
 
 Supported formats : csv, json, parquet, avro, delta, tsv
 Load types        : incremental (Auto Loader), full (batch overwrite)
@@ -44,6 +45,7 @@ FULL_LOAD          = "full"
 SOURCE_TYPE_DBFS   = "dbfs"
 SOURCE_TYPE_S3     = "s3"
 SOURCE_TYPE_ABFSS  = "abfss"
+SOURCE_TYPE_VOLUME = "volume"
 
 METADATA_COL_SOURCE_FILE    = "_source_file"
 METADATA_COL_INGESTION_DATE = "_ingestion_date"
@@ -250,15 +252,22 @@ class AutoLoaderEngine:
         """
         Build the source path URI based on source_type in the dataset config.
 
-        source_type = dbfs  → dbfs:/FileStore/{dbfs_path}/
-        source_type = s3    → s3://{s3_bucket}/{s3_path}/
-        source_type = abfss → uses abfss_path directly
+        source_type = volume → /Volumes/catalog/schema/volume/path/  (UC Volume)
+        source_type = dbfs   → dbfs:/FileStore/{dbfs_path}/
+        source_type = s3     → s3://{s3_bucket}/{s3_path}/
+        source_type = abfss  → uses abfss_path directly
 
         Default is s3 for backward compatibility.
         """
         source_type = cfg.get("source_type", SOURCE_TYPE_S3).lower()
 
-        if source_type == SOURCE_TYPE_DBFS:
+        if source_type == SOURCE_TYPE_VOLUME:
+            # Unity Catalog Volume — direct path, no prefix needed
+            path = cfg.get("volume_path", "").rstrip("/") + "/"
+            logger.debug("UC Volume source path: %s", path)
+            return path
+
+        elif source_type == SOURCE_TYPE_DBFS:
             dbfs_path = cfg.get("dbfs_path", "").strip("/")
             path = f"dbfs:/{dbfs_path}/"
             logger.debug("DBFS source path: %s", path)
@@ -399,7 +408,13 @@ class AutoLoaderEngine:
 
         source_type = cfg.get("source_type", SOURCE_TYPE_S3).lower()
 
-        if source_type == SOURCE_TYPE_DBFS:
+        if source_type == SOURCE_TYPE_VOLUME:
+            if not cfg.get("volume_path"):
+                raise ValueError(
+                    f"'volume_path' is required when source_type=volume. "
+                    f"Dataset: '{cfg.get('dataset_name')}'"
+                )
+        elif source_type == SOURCE_TYPE_DBFS:
             if not cfg.get("dbfs_path"):
                 raise ValueError(
                     f"'dbfs_path' is required when source_type=dbfs. "
