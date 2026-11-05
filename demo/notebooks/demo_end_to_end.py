@@ -57,11 +57,8 @@ VOLUME_PRODUCTS  = f"{VOLUME_DATA}/products"
 VOLUME_SCHEMAS      = f"{VOLUME_BASE}/schemas"
 VOLUME_CHECKPOINTS  = f"{VOLUME_BASE}/checkpoints"
 
-# Bundle files location
-BUNDLE_PATH = (
-    "/Workspace/Users/sushanth.gangadhara@blumetra.com"
-    "/.bundle/dynamic-databricks-ingestion/dev/files"
-)
+# Repo path — use Repos path which is always readable in notebooks
+BUNDLE_PATH = "/Repos/sushanth.gangadhara@blumetra.com/Databricks"
 
 print("=" * 65)
 print("  DEMO CONFIGURATION")
@@ -168,112 +165,59 @@ spark.sql(f"SHOW TABLES IN {CATALOG}.{METADATA_SCHEMA}").show()
 # MAGIC ---
 # MAGIC ## Step 2 — Upload TSV Files to Unity Catalog Volume
 # MAGIC
-# MAGIC Reads TSV content from the bundle path and writes to the UC Volume
-# MAGIC using Python file I/O (works because /Volumes/ is a real filesystem).
+# MAGIC Copies TSV files from the bundle workspace path into the UC Volume.
+# MAGIC The volume path `/Volumes/workspace/ingestion_metadata/demo_volume/data/`
+# MAGIC acts as our source "landing zone" — replacing DBFS and S3 for this demo.
 
 # COMMAND ----------
 
-import os
+import shutil, os
 
-def upload_tsv(bundle_path: str, volume_dir: str, filename: str):
-    """Read TSV from bundle workspace and write to UC Volume."""
+def upload_to_volume(bundle_path: str, volume_dir: str, filename: str):
+    """Copy a TSV file from bundle workspace to UC Volume using Python file I/O."""
     source = f"{bundle_path}/demo/data/{filename}"
     os.makedirs(volume_dir, exist_ok=True)
     target = f"{volume_dir}/{filename}"
-
-    # Read from Workspace using spark (avoids open() on workspace files)
-    content = spark.sparkContext.textFile(source).collect()
-    with open(target, "w", encoding="utf-8") as f:
-        f.write("\n".join(content) + "\n")
-
+    shutil.copy2(source, target)
     size = os.path.getsize(target)
     print(f"  ✓ {filename}  →  {target}  ({size:,} bytes)")
 
 print("Uploading TSV files to UC Volume...")
 print("-" * 60)
-upload_tsv(BUNDLE_PATH, VOLUME_ORDERS,    "orders.tsv")
-upload_tsv(BUNDLE_PATH, VOLUME_CUSTOMERS, "customers.tsv")
-upload_tsv(BUNDLE_PATH, VOLUME_PRODUCTS,  "products.tsv")
+
+upload_to_volume(BUNDLE_PATH, VOLUME_ORDERS,    "orders.tsv")
+upload_to_volume(BUNDLE_PATH, VOLUME_CUSTOMERS,  "customers.tsv")
+upload_to_volume(BUNDLE_PATH, VOLUME_PRODUCTS,   "products.tsv")
+
 print("-" * 60)
-print("✓ Upload complete")
+print("\n✓ All TSV files uploaded to UC Volume")
 
 # Verify
-print("\nFiles in volume:")
-for label, path in [("orders", VOLUME_ORDERS), ("customers", VOLUME_CUSTOMERS), ("products", VOLUME_PRODUCTS)]:
-    for f in os.listdir(path):
-        print(f"  {label}/{f}  ({os.path.getsize(path+'/'+f):,} bytes)")
+print("\nVerifying files in volume:")
+for d, label in [(VOLUME_ORDERS, "orders"), (VOLUME_CUSTOMERS, "customers"), (VOLUME_PRODUCTS, "products")]:
+    files = os.listdir(d)
+    for f in files:
+        size = os.path.getsize(f"{d}/{f}")
+        print(f"  {label}/{f}  ({size:,} bytes)")
 
 # COMMAND ----------
 # MAGIC %md
 # MAGIC ---
 # MAGIC ## Step 3 — Register Dataset Configs into Metadata Tables
+# MAGIC
+# MAGIC The metadata loader reads `demo/demo_config.yml`, computes SHA-256 hashes,
+# MAGIC and MERGEs each dataset into the metadata tables.
 
 # COMMAND ----------
 
-# Fix: Copy framework code from Workspace to driver's local /tmp first
-# (Databricks Workspace files can't be opened directly via Python open())
-import sys, os, shutil
-
-DRIVER_CODE_PATH = "/tmp/ingestion_framework_code"
-
-# Remove stale copy if exists
-if os.path.exists(DRIVER_CODE_PATH):
-    shutil.rmtree(DRIVER_CODE_PATH)
-os.makedirs(DRIVER_CODE_PATH)
-
-def copy_workspace_to_driver(workspace_src: str, local_dst: str):
-    """Recursively copy files from Databricks Workspace path to driver local path."""
-    os.makedirs(local_dst, exist_ok=True)
-    try:
-        items = dbutils.fs.ls(f"file:{workspace_src}")
-    except Exception:
-        # Not a dbutils path — try direct os.listdir
-        if not os.path.exists(workspace_src):
-            return
-        items_raw = os.listdir(workspace_src)
-        for item in items_raw:
-            s = os.path.join(workspace_src, item)
-            d = os.path.join(local_dst, item)
-            if os.path.isdir(s):
-                copy_workspace_to_driver(s, d)
-            else:
-                shutil.copy2(s, d)
-        return
-
-    for item in items:
-        name = item.name.rstrip("/")
-        src  = os.path.join(workspace_src, name)
-        dst  = os.path.join(local_dst, name)
-        if item.isDir():
-            copy_workspace_to_driver(src, dst)
-        else:
-            try:
-                shutil.copy2(src, dst)
-            except Exception:
-                pass
-
-# Copy ingestion_framework and src packages
-for pkg in ["ingestion_framework", "src", "configs", "demo"]:
-    src_path = f"{BUNDLE_PATH}/{pkg}"
-    dst_path = f"{DRIVER_CODE_PATH}/{pkg}"
-    if os.path.exists(src_path):
-        shutil.copytree(src_path, dst_path, dirs_exist_ok=True)
-        print(f"  ✓ Copied {pkg} → {dst_path}")
-    else:
-        print(f"  ✗ Not found: {src_path}")
-
-# Add to Python path
-if DRIVER_CODE_PATH not in sys.path:
-    sys.path.insert(0, DRIVER_CODE_PATH)
-
-print(f"\n✓ Framework code ready at {DRIVER_CODE_PATH}")
-
-# COMMAND ----------
+import sys
+if BUNDLE_PATH not in sys.path:
+    sys.path.insert(0, BUNDLE_PATH)
 
 from pathlib import Path
 from ingestion_framework.metadata_service.metadata_loader import MetadataLoader
 
-demo_config_path = Path(f"{DRIVER_CODE_PATH}/demo/demo_config.yml")
+demo_config_path = Path(f"{BUNDLE_PATH}/demo/demo_config.yml")
 
 print(f"Loading metadata from : {demo_config_path}")
 print(f"Target catalog.schema : {CATALOG}.{METADATA_SCHEMA}")
