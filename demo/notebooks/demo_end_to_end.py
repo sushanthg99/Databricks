@@ -174,39 +174,21 @@ import os
 
 def upload_tsv_to_volume(repo_path: str, volume_dir: str, filename: str):
     """
-    Read a TSV file from the Repo using Spark and write it to a UC Volume.
-    Uses spark.read (not Python open()) because Repo files are workspace objects.
+    Read TSV from Repos using sparkContext.textFile() — the only read method
+    that works on Repos paths without triggering DBFS_DISABLED.
+    Writes result to UC Volume using Python open().
     """
     source = f"{repo_path}/demo/data/{filename}"
     os.makedirs(volume_dir, exist_ok=True)
     target = f"{volume_dir}/{filename}"
 
-    # Read via Spark and write as a single file to the volume
-    (
-        spark.read
-        .option("header", "true")
-        .option("delimiter", "\t")
-        .option("inferSchema", "true")
-        .csv(source)
-        .coalesce(1)                    # write as single file
-        .write
-        .mode("overwrite")
-        .option("header", "true")
-        .option("delimiter", "\t")
-        .csv(volume_dir + f"/_tmp_{filename}")
-    )
+    # sparkContext.textFile works on Repos paths (not treated as DBFS)
+    lines = spark.sparkContext.textFile(source).collect()
+    with open(target, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
 
-    # Rename the part file to the expected filename
-    import glob
-    part_files = glob.glob(f"{volume_dir}/_tmp_{filename}/part-*.csv")
-    if part_files:
-        import shutil
-        shutil.copy(part_files[0], target)
-        shutil.rmtree(f"{volume_dir}/_tmp_{filename}", ignore_errors=True)
-        size = os.path.getsize(target)
-        print(f"  ✓ {filename}  →  {target}  ({size:,} bytes)")
-    else:
-        raise FileNotFoundError(f"No part file found after writing {filename}")
+    size = os.path.getsize(target)
+    print(f"  ✓ {filename}  →  {target}  ({size:,} bytes)")
 
 print("Uploading TSV files to UC Volume...")
 print("-" * 60)
