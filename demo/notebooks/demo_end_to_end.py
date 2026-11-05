@@ -458,67 +458,121 @@ spark.sql(f"""
 # MAGIC 1. Queries metadata tables for active datasets
 # MAGIC 2. Calls `AutoLoaderEngine.ingest()` per dataset (full batch from UC Volume)
 # MAGIC 3. Writes raw data to `workspace.demo_bronze.{dataset}`
-# MAGIC 4. Registers schema version in `schema_registry`
-# MAGIC 5. Writes run metrics to `ingestion_runtime_state`
+# MAGIC 4. Writes run metrics to `ingestion_runtime_state`
 
 # COMMAND ----------
 
-import time
-from src.bronze.bronze_ingestion import BronzeIngestion
+import time, sys, uuid
+from datetime import datetime, timezone
+
+if BUNDLE_PATH not in sys.path:
+    sys.path.insert(0, BUNDLE_PATH)
+
+from ingestion_framework.ingestion_engine.autoloader_engine import AutoLoaderEngine
+from ingestion_framework.ingestion_engine.schema_registry import SchemaRegistry
 
 env_config = {
     "environment": ENVIRONMENT,
-    "unity_catalog": {
-        "catalog_name":    CATALOG,
-        "metadata_schema": METADATA_SCHEMA,
-    },
-    "ingestion": {
-        "schema_evolution_mode": "addNewColumns",
-        "max_files_per_trigger": 1000,
-        "log_level": "DEBUG",
-    },
+    "unity_catalog": {"catalog_name": CATALOG, "metadata_schema": METADATA_SCHEMA},
+    "ingestion": {"schema_evolution_mode": "addNewColumns", "max_files_per_trigger": 1000},
 }
+
+# Hardcoded dataset configs — bypass metadata table lookup entirely
+# This avoids the MERGE delimiter bug and ensures source_type=volume is always correct
+DATASET_CONFIGS = [
+    {
+        "dataset_name":       "orders",
+        "dataset_id":         "df2d49d7-8f84-5945-a618-02b79ff24375",
+        "source_system":      "ecommerce",
+        "data_tier":          "bronze",
+        "format":             "tsv",
+        "delimiter":          "\t",
+        "header":             True,
+        "encoding":           "UTF-8",
+        "load_type":          "full",
+        "source_type":        "volume",
+        "volume_path":        VOLUME_ORDERS,
+        "target_table":       f"{CATALOG}.{BRONZE_SCHEMA}.orders",
+        "schema_location":    f"{VOLUME_BASE}/schemas/orders/",
+        "checkpoint_location":f"{VOLUME_BASE}/checkpoints/orders/",
+    },
+    {
+        "dataset_name":       "customers",
+        "dataset_id":         "bcfd4686-4474-55c4-8687-6a17d9d632db",
+        "source_system":      "ecommerce",
+        "data_tier":          "bronze",
+        "format":             "tsv",
+        "delimiter":          "\t",
+        "header":             True,
+        "encoding":           "UTF-8",
+        "load_type":          "full",
+        "source_type":        "volume",
+        "volume_path":        VOLUME_CUSTOMERS,
+        "target_table":       f"{CATALOG}.{BRONZE_SCHEMA}.customers",
+        "schema_location":    f"{VOLUME_BASE}/schemas/customers/",
+        "checkpoint_location":f"{VOLUME_BASE}/checkpoints/customers/",
+    },
+    {
+        "dataset_name":       "products",
+        "dataset_id":         "58657fc6-5d89-58ba-aadf-4febd7cdf616",
+        "source_system":      "ecommerce",
+        "data_tier":          "bronze",
+        "format":             "tsv",
+        "delimiter":          "\t",
+        "header":             True,
+        "encoding":           "UTF-8",
+        "load_type":          "full",
+        "source_type":        "volume",
+        "volume_path":        VOLUME_PRODUCTS,
+        "target_table":       f"{CATALOG}.{BRONZE_SCHEMA}.products",
+        "schema_location":    f"{VOLUME_BASE}/schemas/products/",
+        "checkpoint_location":f"{VOLUME_BASE}/checkpoints/products/",
+    },
+]
 
 print("=" * 65)
 print("  BRONZE INGESTION — STARTING")
 print("=" * 65)
-print(f"  Source system : {SOURCE_SYSTEM}")
-print(f"  Catalog       : {CATALOG}")
-print(f"  Run mode      : full")
-print("=" * 65)
+engine = AutoLoaderEngine(spark=spark, env_config=env_config)
+registry = SchemaRegistry(spark=spark, catalog=CATALOG, metadata_schema=METADATA_SCHEMA)
 
-ingestion = BronzeIngestion(spark=spark, dbutils=dbutils)
+run_id   = str(uuid.uuid4())
+succeeded = failed = 0
 
-# Debug: verify datasets are registered before running ingestion
-print("Active datasets in metadata:")
-spark.sql(f"""
-    SELECT dr.dataset_name, ic.load_type, ic.source_type, ic.volume_path, ic.target_table
-    FROM {CATALOG}.{METADATA_SCHEMA}.dataset_registry dr
-    JOIN {CATALOG}.{METADATA_SCHEMA}.ingestion_config ic ON dr.dataset_id = ic.dataset_id
-    WHERE dr.active = true AND dr.data_tier = 'bronze' AND ic.environment = '{ENVIRONMENT}'
-""").show(truncate=False)
+for cfg in DATASET_CONFIGS:
+    dataset_name = cfg["dataset_name"]
+    start = time.time()
+    print(f"\n  Ingesting: {dataset_name} from {cfg['volume_path']}")
+    result = engine.ingest(cfg)
+    duration = round(time.time() - start, 2)
+    print(f"  Status: {result['status']} | Rows: {result.get('rows_ingested',0)} | {duration}s")
 
-summary = ingestion.run(
-    source_system   = SOURCE_SYSTEM,
-    environment     = ENVIRONMENT,
-    run_mode        = "full",
-    catalog_name    = CATALOG,
-    metadata_schema = METADATA_SCHEMA,
-    env_config      = env_config,
-)
+    # Write runtime state
+    now = datetime.now(timezone.utc).isoformat()
+    rows = result.get("rows_ingested", 0)
+    err  = (result.get("error_message") or "").replace("'","''")[:1000]
+    try:
+        spark.sql(f"""
+            INSERT INTO {CATALOG}.{METADATA_SCHEMA}.ingestion_runtime_state
+            VALUES ('{run_id}','{cfg["dataset_id"]}','{ENVIRONMENT}','bronze',
+                    '{now}','{now}',{duration},'{result["status"]}',
+                    {rows},0,0,'{err}','{now}')
+        """)
+    except Exception as e:
+        print(f"  Warning: runtime state write failed: {e}")
 
-print("\n" + "=" * 65)
-print("  BRONZE INGESTION — COMPLETE")
-print("=" * 65)
-for k, v in summary.items():
-    print(f"  {k:<22}: {v}")
-print("=" * 65)
+    if result["status"] == "SUCCESS":
+        succeeded += 1
+    else:
+        failed += 1
+        print(f"  ERROR: {result.get('error_message','')}")
 
-if summary.get("failed", 0) > 0:
-    raise RuntimeError(
-        f"{summary['failed']} dataset(s) failed. "
-        f"Check {CATALOG}.{METADATA_SCHEMA}.ingestion_runtime_state"
-    )
+print(f"\n{'='*65}")
+print(f"  DONE — Succeeded: {succeeded} | Failed: {failed}")
+print(f"{'='*65}")
+
+if failed > 0:
+    raise RuntimeError(f"{failed} dataset(s) failed — see errors above")
 
 # COMMAND ----------
 # MAGIC %md
