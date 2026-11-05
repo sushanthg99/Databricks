@@ -1,0 +1,11 @@
+product_id	product_name	category	sub_category	brand	sku	unit_price	cost_price	stock_quantity	reorder_level	supplier_id	is_active	created_date	last_updated
+PROD001	MacBook Pro 14	Electronics	Laptops	Apple	APL-MBP14-2026	1299.99	950.00	45	10	SUP001	true	2025-01-01	2026-10-01
+PROD002	Wireless Headphones	Electronics	Audio	Sony	SNY-WH1000XM6	89.99	45.00	200	50	SUP002	true	2025-03-15	2026-09-15
+PROD003	Standing Desk	Furniture	Office	FlexiDesk	FD-SD-001	499.50	280.00	30	8	SUP003	true	2025-02-10	2026-08-20
+PROD004	Mechanical Keyboard	Electronics	Peripherals	Logitech	LGT-MX-KEYS	24.99	12.00	500	100	SUP002	true	2025-04-05	2026-10-01
+PROD005	Ergonomic Chair	Furniture	Office	HermanMiller	HM-AERON-B	349.00	200.00	25	5	SUP003	true	2025-01-20	2026-07-10
+PROD006	USB-C Hub	Electronics	Accessories	Anker	ANK-A8352	59.99	25.00	350	80	SUP004	true	2025-05-12	2026-09-01
+PROD007	Monitor 27 4K	Electronics	Displays	LG	LG-27UK850	199.00	120.00	60	15	SUP002	true	2025-03-01	2026-10-01
+PROD008	Desk Lamp LED	Home	Lighting	Philips	PHL-DL-LED	74.99	35.00	150	40	SUP005	true	2025-06-08	2026-09-20
+PROD009	Noise Cancelling Earbuds	Electronics	Audio	Bose	BSE-QC-45	899.00	550.00	80	20	SUP001	true	2025-02-28	2026-10-01
+PROD010	Webcam HD 1080p	Electronics	Peripherals	Logitech	LGT-C920	149.99	70.00	120	30	SUP002	true	2025-07-15	2026-09-15

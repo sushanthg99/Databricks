@@ -5,7 +5,7 @@ Core file ingestion engine for the Dynamic Databricks Ingestion Framework.
 
 Responsibilities
 ----------------
-1. Discover source files on AWS S3 based on dataset configuration.
+1. Discover source files based on dataset configuration.
 2. Select the appropriate Spark reader based on file format.
 3. Support Databricks Auto Loader (cloudFiles) for incremental ingestion.
 4. Support batch overwrite for full-load datasets.
@@ -13,7 +13,13 @@ Responsibilities
 6. Add standard metadata columns to every ingested DataFrame.
 7. Write the resulting DataFrame to the target Delta table.
 
-Supported formats : csv, json, parquet, avro, delta
+Supported source types
+----------------------
+- dbfs  : dbfs:/FileStore/...  — Databricks File System (demo / no S3)
+- s3    : s3://bucket/path/    — AWS S3 (production)
+- abfss : abfss://...          — Azure Data Lake (future)
+
+Supported formats : csv, json, parquet, avro, delta, tsv
 Load types        : incremental (Auto Loader), full (batch overwrite)
 """
 
@@ -31,9 +37,13 @@ logger = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 
-SUPPORTED_FORMATS = {"csv", "json", "parquet", "avro", "delta"}
-INCREMENTAL_LOAD  = "incremental"
-FULL_LOAD         = "full"
+SUPPORTED_FORMATS  = {"csv", "json", "parquet", "avro", "delta", "tsv"}
+INCREMENTAL_LOAD   = "incremental"
+FULL_LOAD          = "full"
+
+SOURCE_TYPE_DBFS   = "dbfs"
+SOURCE_TYPE_S3     = "s3"
+SOURCE_TYPE_ABFSS  = "abfss"
 
 METADATA_COL_SOURCE_FILE    = "_source_file"
 METADATA_COL_INGESTION_DATE = "_ingestion_date"
@@ -46,7 +56,12 @@ METADATA_COL_INGESTION_TS   = "_ingestion_timestamp"
 
 class AutoLoaderEngine:
     """
-    Orchestrates file ingestion from AWS S3 into Delta Bronze tables.
+    Orchestrates file ingestion from DBFS or AWS S3 into Delta Bronze tables.
+
+    Supports both Databricks Auto Loader (incremental) and batch overwrite
+    (full load). Source type is driven by dataset configuration:
+      - source_type: dbfs  → reads from DBFS (demo mode, no S3 needed)
+      - source_type: s3    → reads from AWS S3 (production)
 
     Parameters
     ----------
@@ -57,8 +72,8 @@ class AutoLoaderEngine:
     """
 
     def __init__(self, spark: "SparkSession", env_config: dict[str, Any]) -> None:
-        self.spark = spark
-        self.env_config = env_config
+        self.spark        = spark
+        self.env_config   = env_config
         self._ingestion_cfg = env_config.get("ingestion", {})
 
     # ------------------------------------------------------------------
@@ -67,7 +82,7 @@ class AutoLoaderEngine:
 
     def ingest(self, dataset_config: dict[str, Any]) -> dict[str, Any]:
         """
-        Ingest a single dataset from S3 into a Delta Bronze table.
+        Ingest a single dataset into a Delta Bronze table.
 
         Parameters
         ----------
@@ -82,10 +97,11 @@ class AutoLoaderEngine:
         dataset_name = dataset_config["dataset_name"]
         load_type    = dataset_config.get("load_type", INCREMENTAL_LOAD)
         fmt          = dataset_config.get("format", "").lower()
+        source_type  = dataset_config.get("source_type", SOURCE_TYPE_S3).lower()
 
         logger.info(
-            "Starting ingestion | dataset=%s | load_type=%s | format=%s",
-            dataset_name, load_type, fmt,
+            "Starting ingestion | dataset=%s | source_type=%s | load_type=%s | format=%s",
+            dataset_name, source_type, load_type, fmt,
         )
 
         self._validate_config(dataset_config)
@@ -103,12 +119,14 @@ class AutoLoaderEngine:
             return {"status": "SUCCESS", "error_message": None, **metrics}
 
         except Exception as exc:
-            logger.exception("Ingestion failed | dataset=%s | error=%s", dataset_name, exc)
+            logger.exception(
+                "Ingestion failed | dataset=%s | error=%s", dataset_name, exc
+            )
             return {
-                "status": "FAILED",
-                "rows_ingested": 0,
+                "status":            "FAILED",
+                "rows_ingested":     0,
                 "source_file_count": 0,
-                "error_message": str(exc),
+                "error_message":     str(exc),
             }
 
     # ------------------------------------------------------------------
@@ -119,28 +137,25 @@ class AutoLoaderEngine:
         """
         Read files incrementally using Databricks Auto Loader (cloudFiles).
 
-        Auto Loader tracks processed files via a checkpoint directory stored
-        in a Unity Catalog Volume. The inferred schema is stored in a schema
-        location Volume to avoid re-inference on every run.
-
+        Works for both DBFS (demo) and S3 (production) source types.
         trigger(availableNow=True) processes all backlog then stops —
         ideal for scheduled jobs (no always-on streaming cluster needed).
         """
-        source_path        = self._build_source_path(cfg)
-        fmt                = cfg["format"].lower()
-        reader_options     = self._build_reader_options(cfg)
-        schema_location    = cfg["schema_location"]
-        checkpoint_location= cfg["checkpoint_location"]
-        target_table       = cfg["target_table"]
-        max_files          = self._ingestion_cfg.get("max_files_per_trigger", 1000)
-        schema_evo_mode    = self._schema_evolution_mode()
+        source_path         = self._build_source_path(cfg)
+        fmt                 = self._resolve_format(cfg)
+        reader_options      = self._build_reader_options(cfg)
+        schema_location     = cfg["schema_location"]
+        checkpoint_location = cfg["checkpoint_location"]
+        target_table        = cfg["target_table"]
+        max_files           = self._ingestion_cfg.get("max_files_per_trigger", 1000)
+        schema_evo_mode     = self._schema_evolution_mode()
 
         logger.info(
-            "Auto Loader | source=%s | schema_loc=%s | checkpoint=%s | target=%s",
-            source_path, schema_location, checkpoint_location, target_table,
+            "Auto Loader | source=%s | fmt=%s | schema_loc=%s | checkpoint=%s | target=%s",
+            source_path, fmt, schema_location, checkpoint_location, target_table,
         )
 
-        # Build the Auto Loader streaming reader
+        # Build Auto Loader streaming reader
         stream_reader = (
             self.spark.readStream
             .format("cloudFiles")
@@ -156,16 +171,12 @@ class AutoLoaderEngine:
         for k, v in reader_options.items():
             stream_reader = stream_reader.option(k, v)
 
-        # Load from S3 source
         df = stream_reader.load(source_path)
-
-        # Add standard metadata columns
         df = self._add_metadata_columns(df)
 
-        # Ensure target schema exists before writing
         self._ensure_schema_exists(target_table)
 
-        # Write stream — availableNow processes backlog then stops
+        # availableNow = process all backlog then stop (batch-like streaming)
         query = (
             df.writeStream
             .format("delta")
@@ -175,19 +186,14 @@ class AutoLoaderEngine:
             .trigger(availableNow=True)
             .toTable(target_table)
         )
-
-        # Wait for the streaming query to finish processing
         query.awaitTermination()
 
-        # Get row count from the written table
         rows_ingested = self.spark.table(target_table).count()
-
         logger.info(
             "Auto Loader complete | dataset=%s | rows=%d",
             cfg["dataset_name"], rows_ingested,
         )
         return {"rows_ingested": rows_ingested, "source_file_count": -1}
-        # source_file_count = -1 means "managed by Auto Loader checkpoint"
 
     # ------------------------------------------------------------------
     # Full load — batch overwrite
@@ -197,11 +203,11 @@ class AutoLoaderEngine:
         """
         Read all files in the source path and overwrite the target Delta table.
 
-        Used for datasets where load_type = full — entire table is replaced
-        on each run. Safe to re-run (idempotent).
+        Works for both DBFS (demo) and S3 (production).
+        Entire table is replaced on each run — safe to re-run (idempotent).
         """
         source_path    = self._build_source_path(cfg)
-        fmt            = cfg["format"].lower()
+        fmt            = self._resolve_format(cfg)
         reader_options = self._build_reader_options(cfg)
         target_table   = cfg["target_table"]
 
@@ -210,7 +216,6 @@ class AutoLoaderEngine:
             source_path, fmt, target_table,
         )
 
-        # Read all files from S3
         df = (
             self.spark.read
             .format(fmt)
@@ -218,16 +223,11 @@ class AutoLoaderEngine:
             .load(source_path)
         )
 
-        # Add standard metadata columns
         df = self._add_metadata_columns(df)
-
-        # Count before write (batch reads are not lazy after load)
         rows_ingested = df.count()
 
-        # Ensure target schema exists
         self._ensure_schema_exists(target_table)
 
-        # Overwrite entire table — safe, idempotent full refresh
         (
             df.write
             .format("delta")
@@ -243,33 +243,79 @@ class AutoLoaderEngine:
         return {"rows_ingested": rows_ingested, "source_file_count": -1}
 
     # ------------------------------------------------------------------
+    # Source path builder — supports DBFS, S3, ABFSS
+    # ------------------------------------------------------------------
+
+    def _build_source_path(self, cfg: dict[str, Any]) -> str:
+        """
+        Build the source path URI based on source_type in the dataset config.
+
+        source_type = dbfs  → dbfs:/FileStore/{dbfs_path}/
+        source_type = s3    → s3://{s3_bucket}/{s3_path}/
+        source_type = abfss → uses abfss_path directly
+
+        Default is s3 for backward compatibility.
+        """
+        source_type = cfg.get("source_type", SOURCE_TYPE_S3).lower()
+
+        if source_type == SOURCE_TYPE_DBFS:
+            dbfs_path = cfg.get("dbfs_path", "").strip("/")
+            path = f"dbfs:/{dbfs_path}/"
+            logger.debug("DBFS source path: %s", path)
+            return path
+
+        elif source_type == SOURCE_TYPE_ABFSS:
+            path = cfg.get("abfss_path", "")
+            logger.debug("ABFSS source path: %s", path)
+            return path
+
+        else:
+            # Default: AWS S3
+            bucket = cfg["s3_bucket"]
+            s3path = cfg.get("s3_path", "").strip("/")
+            path = f"s3://{bucket}/{s3path}/"
+            logger.debug("S3 source path: %s", path)
+            return path
+
+    # ------------------------------------------------------------------
+    # Format resolver — TSV is CSV with tab delimiter
+    # ------------------------------------------------------------------
+
+    def _resolve_format(self, cfg: dict[str, Any]) -> str:
+        """
+        Resolve the Spark reader format.
+        TSV files are read using the 'csv' format with delimiter=\\t.
+        """
+        fmt = cfg.get("format", "csv").lower()
+        return "csv" if fmt == "tsv" else fmt
+
+    # ------------------------------------------------------------------
     # Reader options builder
     # ------------------------------------------------------------------
 
     def _build_reader_options(self, cfg: dict[str, Any]) -> dict[str, str]:
         """
-        Build Spark reader options dict from dataset configuration.
+        Build Spark reader options from dataset configuration.
+
+        TSV is treated as CSV with tab delimiter.
         Merges format-specific defaults with per-dataset overrides.
         """
-        fmt     = cfg.get("format", "").lower()
+        fmt     = cfg.get("format", "csv").lower()
         options: dict[str, str] = {}
 
-        if fmt == "csv":
+        if fmt in ("csv", "tsv"):
+            # TSV uses tab as delimiter; CSV uses comma by default
+            default_delimiter = "\t" if fmt == "tsv" else ","
             options["header"]      = str(cfg.get("header", True)).lower()
-            options["delimiter"]   = cfg.get("delimiter", ",")
+            options["delimiter"]   = cfg.get("delimiter", default_delimiter)
             options["encoding"]    = cfg.get("encoding", "UTF-8")
             options["inferSchema"] = "true"
-            # Optional overrides from config
             if cfg.get("date_format"):
                 options["dateFormat"] = cfg["date_format"]
             if cfg.get("timestamp_format"):
                 options["timestampFormat"] = cfg["timestamp_format"]
             if cfg.get("null_value"):
                 options["nullValue"] = cfg["null_value"]
-            if cfg.get("escape_char"):
-                options["escape"] = cfg["escape_char"]
-            if cfg.get("quote_char"):
-                options["quote"] = cfg["quote_char"]
 
         elif fmt == "json":
             options["encoding"]  = cfg.get("encoding", "UTF-8")
@@ -286,19 +332,9 @@ class AutoLoaderEngine:
             options["ignoreExtension"] = "false"
 
         elif fmt == "delta":
-            pass  # Delta reads rarely need additional options
+            pass
 
         return options
-
-    # ------------------------------------------------------------------
-    # Source path builder
-    # ------------------------------------------------------------------
-
-    def _build_source_path(self, cfg: dict[str, Any]) -> str:
-        """Build the full s3://bucket/path/ URI from config components."""
-        bucket = cfg["s3_bucket"]
-        path   = cfg.get("s3_path", "").strip("/")
-        return f"s3://{bucket}/{path}/"
 
     # ------------------------------------------------------------------
     # Metadata columns
@@ -308,11 +344,9 @@ class AutoLoaderEngine:
         """
         Append standard audit columns to every ingested DataFrame.
 
-        Columns added
-        -------------
-        _source_file        : originating S3 file path
+        _source_file        : originating file path (DBFS or S3)
         _ingestion_date     : date of the ingestion run
-        _ingestion_timestamp: precise UTC timestamp of ingestion
+        _ingestion_timestamp: precise UTC timestamp
         """
         from pyspark.sql import functions as F
 
@@ -329,21 +363,16 @@ class AutoLoaderEngine:
 
     def _ensure_schema_exists(self, target_table: str) -> None:
         """
-        Create the target schema (database) if it does not exist.
-
-        target_table format: catalog.schema.table
-        This extracts catalog.schema and issues CREATE SCHEMA IF NOT EXISTS.
+        Create the target catalog.schema if it does not exist.
+        Handles both 3-part (catalog.schema.table) and 2-part (schema.table).
         """
         parts = target_table.split(".")
-        if len(parts) == 3:
-            catalog_schema = f"{parts[0]}.{parts[1]}"
+        if len(parts) >= 2:
+            catalog_schema = ".".join(parts[:-1])
             try:
-                self.spark.sql(
-                    f"CREATE SCHEMA IF NOT EXISTS {catalog_schema}"
-                )
+                self.spark.sql(f"CREATE SCHEMA IF NOT EXISTS {catalog_schema}")
                 logger.debug("Schema ensured: %s", catalog_schema)
             except Exception as exc:
-                # Non-fatal — table write will surface the real error if schema missing
                 logger.warning(
                     "Could not create schema %s: %s", catalog_schema, exc
                 )
@@ -354,25 +383,37 @@ class AutoLoaderEngine:
 
     def _validate_config(self, cfg: dict[str, Any]) -> None:
         """
-        Validate required config keys and value constraints.
+        Validate required config keys.
 
-        Raises
-        ------
-        ValueError
-            If a required key is missing or has an unsupported value.
+        source_type = dbfs  → requires dbfs_path
+        source_type = s3    → requires s3_bucket + s3_path
+        All types require: dataset_name, format, load_type, target_table
         """
-        required_keys = [
-            "dataset_name", "format", "load_type",
-            "s3_bucket", "s3_path", "target_table",
-        ]
-        for key in required_keys:
+        always_required = ["dataset_name", "format", "load_type", "target_table"]
+        for key in always_required:
             if not cfg.get(key):
                 raise ValueError(
                     f"Missing required key '{key}' for dataset "
                     f"'{cfg.get('dataset_name', 'UNKNOWN')}'"
                 )
 
-        fmt = cfg["format"].lower()
+        source_type = cfg.get("source_type", SOURCE_TYPE_S3).lower()
+
+        if source_type == SOURCE_TYPE_DBFS:
+            if not cfg.get("dbfs_path"):
+                raise ValueError(
+                    f"'dbfs_path' is required when source_type=dbfs. "
+                    f"Dataset: '{cfg.get('dataset_name')}'"
+                )
+        elif source_type == SOURCE_TYPE_S3:
+            for key in ("s3_bucket", "s3_path"):
+                if not cfg.get(key):
+                    raise ValueError(
+                        f"'{key}' is required when source_type=s3. "
+                        f"Dataset: '{cfg.get('dataset_name')}'"
+                    )
+
+        fmt = cfg.get("format", "").lower()
         if fmt not in SUPPORTED_FORMATS:
             raise ValueError(
                 f"Unsupported format '{fmt}' for dataset '{cfg['dataset_name']}'. "
@@ -382,8 +423,8 @@ class AutoLoaderEngine:
         load_type = cfg.get("load_type", "").lower()
         if load_type not in (INCREMENTAL_LOAD, FULL_LOAD):
             raise ValueError(
-                f"Invalid load_type '{load_type}' for dataset '{cfg['dataset_name']}'. "
-                f"Must be '{INCREMENTAL_LOAD}' or '{FULL_LOAD}'."
+                f"Invalid load_type '{load_type}' for dataset "
+                f"'{cfg['dataset_name']}'. Must be 'incremental' or 'full'."
             )
 
         if load_type == INCREMENTAL_LOAD:
@@ -399,5 +440,5 @@ class AutoLoaderEngine:
     # ------------------------------------------------------------------
 
     def _schema_evolution_mode(self) -> str:
-        """Return schema evolution mode from env config. Default: addNewColumns."""
+        """Return schema evolution mode from env config."""
         return self._ingestion_cfg.get("schema_evolution_mode", "addNewColumns")
