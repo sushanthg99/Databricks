@@ -86,6 +86,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger("demo_notebook")
 
+# Force reload of all modules — picks up latest code without kernel restart
+%load_ext autoreload
+%autoreload 2
+
 print("Creating schemas...")
 spark.sql(f"CREATE SCHEMA IF NOT EXISTS {CATALOG}.{METADATA_SCHEMA} COMMENT 'Demo ingestion metadata'")
 print(f"  ✓ {CATALOG}.{METADATA_SCHEMA}")
@@ -436,11 +440,11 @@ spark.sql(f"""
     ORDER BY dataset_name
 """).show(truncate=False)
 
-# Verify ingestion_config
+# Verify ingestion_config — confirm source_type=volume is stored correctly
 print("── ingestion_config ───────────────────────────────────────────")
 spark.sql(f"""
     SELECT dataset_id, environment, source_type, load_type,
-           format, target_table
+           format, target_table, volume_path
     FROM {CATALOG}.{METADATA_SCHEMA}.ingestion_config
     ORDER BY dataset_id
 """).show(truncate=False)
