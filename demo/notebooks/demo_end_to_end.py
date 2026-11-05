@@ -297,6 +297,7 @@ datasets:
     header: true
     ingestion_mode: batch
     load_type: full
+    target_table: {CATALOG}.{BRONZE_SCHEMA}.orders
     schema_location: {VOLUME_BASE}/schemas/orders/
     checkpoint_location: {VOLUME_BASE}/checkpoints/orders/
     primary_keys: [order_id]
@@ -341,6 +342,7 @@ datasets:
     header: true
     ingestion_mode: batch
     load_type: full
+    target_table: {CATALOG}.{BRONZE_SCHEMA}.customers
     schema_location: {VOLUME_BASE}/schemas/customers/
     checkpoint_location: {VOLUME_BASE}/checkpoints/customers/
     primary_keys: [customer_id]
@@ -379,6 +381,7 @@ datasets:
     header: true
     ingestion_mode: batch
     load_type: full
+    target_table: {CATALOG}.{BRONZE_SCHEMA}.products
     schema_location: {VOLUME_BASE}/schemas/products/
     checkpoint_location: {VOLUME_BASE}/checkpoints/products/
     primary_keys: [product_id]

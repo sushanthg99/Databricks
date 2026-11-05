@@ -343,7 +343,9 @@ class MetadataLoader:
         source_system = cfg.get("source_system", "")
         data_tier     = cfg.get("data_tier", "bronze")
         dataset_name  = cfg["dataset_name"]
-        target_table  = f"{self.catalog}.{source_system}_{data_tier}.{dataset_name}"
+        # Use explicit target_table from config if provided, otherwise build it
+        target_table  = cfg.get("target_table") or \
+                        f"{self.catalog}.{source_system}_{data_tier}.{dataset_name}"
 
         sql = f"""
         MERGE INTO {self._ingestion_config_table} AS target
