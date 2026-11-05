@@ -95,22 +95,33 @@ jobs:
           REPO_ID=$(databricks repos list --output json 2>/dev/null | \
             python3 -c "
           import sys, json
-          repos = json.load(sys.stdin)
-          for r in repos:
-              if r.get('path') == '$REPO_PATH':
-                  print(r['id'])
-                  break
+          try:
+              repos = json.load(sys.stdin)
+              for r in repos:
+                  if r.get('path') == '$REPO_PATH':
+                      print(r['id'])
+                      break
+          except:
+              pass
           " 2>/dev/null || echo "")
 
           if [ -n "$REPO_ID" ]; then
-            echo "Found existing repo ID: $REPO_ID — deleting..."
-            databricks repos delete "$REPO_ID" || true
-            sleep 3
+            echo "Found repo ID: $REPO_ID — updating to latest main..."
+            # Force update — discards any local changes in the Databricks Repo
+            databricks repos update "$REPO_ID" --branch main && \
+              echo "✅ Repos UI updated successfully" || \
+            {
+              echo "Update failed (conflict) — re-creating repo..."
+              databricks repos delete "$REPO_ID" || true
+              sleep 2
+              databricks repos create "$REPO_URL" gitHub --path "$REPO_PATH"
+              echo "✅ Repos UI re-created successfully"
+            }
+          else
+            echo "No existing repo found — creating..."
+            databricks repos create "$REPO_URL" gitHub --path "$REPO_PATH"
+            echo "✅ Repos UI created successfully"
           fi
-
-          echo "Creating fresh repo from main branch..."
-          databricks repos create "$REPO_URL" gitHub --path "$REPO_PATH"
-          echo "✅ Repos UI synced successfully"
 
       - name: Summary
         run: |
