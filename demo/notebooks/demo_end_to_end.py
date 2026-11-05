@@ -163,42 +163,91 @@ spark.sql(f"SHOW TABLES IN {CATALOG}.{METADATA_SCHEMA}").show()
 # COMMAND ----------
 # MAGIC %md
 # MAGIC ---
-# MAGIC ## Step 2 — Upload TSV Files to Unity Catalog Volume
+# MAGIC ## Step 2 — Write TSV Data to Unity Catalog Volume
 # MAGIC
-# MAGIC Reads TSV files using Spark (Repos files aren't accessible via Python file I/O)
-# MAGIC and writes them to the UC Volume as the ingestion source.
+# MAGIC Data is embedded directly in the notebook — no file copying needed.
+# MAGIC Works on serverless compute (no sparkContext, no DBFS, no file I/O from Repos).
 
 # COMMAND ----------
 
 import os
 
-def upload_tsv_to_volume(repo_path: str, volume_dir: str, filename: str):
-    """
-    Read TSV from Repos using sparkContext.textFile() — the only read method
-    that works on Repos paths without triggering DBFS_DISABLED.
-    Writes result to UC Volume using Python open().
-    """
-    source = f"{repo_path}/demo/data/{filename}"
+# Inline TSV data — embedded directly so no file reading is needed
+ORDERS_TSV = """order_id\tcustomer_id\tproduct_id\torder_date\torder_timestamp\torder_status\torder_amount\tquantity\tshipping_city\tshipping_country\tpayment_method\tdiscount_pct
+1001\tCUST001\tPROD001\t2026-10-01\t2026-10-01 08:15:00\tDELIVERED\t1299.99\t1\tNew York\tUS\tCREDIT_CARD\t5.0
+1002\tCUST002\tPROD002\t2026-10-01\t2026-10-01 09:30:00\tDELIVERED\t89.99\t2\tLos Angeles\tUS\tPAYPAL\t0.0
+1003\tCUST003\tPROD003\t2026-10-01\t2026-10-01 10:45:00\tSHIPPED\t499.50\t1\tChicago\tUS\tDEBIT_CARD\t10.0
+1004\tCUST001\tPROD004\t2026-10-02\t2026-10-02 08:00:00\tCONFIRMED\t24.99\t3\tNew York\tUS\tCREDIT_CARD\t0.0
+1005\tCUST004\tPROD001\t2026-10-02\t2026-10-02 11:20:00\tPENDING\t1299.99\t1\tHouston\tUS\tCREDIT_CARD\t0.0
+1006\tCUST005\tPROD005\t2026-10-02\t2026-10-02 13:10:00\tDELIVERED\t349.00\t1\tPhoenix\tUS\tPAYPAL\t15.0
+1007\tCUST002\tPROD006\t2026-10-03\t2026-10-03 07:45:00\tCANCELLED\t59.99\t1\tLos Angeles\tUS\tDEBIT_CARD\t0.0
+1008\tCUST006\tPROD002\t2026-10-03\t2026-10-03 09:00:00\tDELIVERED\t89.99\t4\tPhiladelphia\tUS\tCREDIT_CARD\t5.0
+1009\tCUST007\tPROD003\t2026-10-03\t2026-10-03 14:30:00\tSHIPPED\t499.50\t2\tSan Antonio\tUS\tPAYPAL\t0.0
+1010\tCUST003\tPROD007\t2026-10-04\t2026-10-04 08:20:00\tDELIVERED\t199.00\t1\tChicago\tUS\tCREDIT_CARD\t0.0
+1011\tCUST008\tPROD001\t2026-10-04\t2026-10-04 10:00:00\tCONFIRMED\t1299.99\t1\tSan Diego\tUS\tDEBIT_CARD\t10.0
+1012\tCUST009\tPROD004\t2026-10-04\t2026-10-04 11:45:00\tDELIVERED\t24.99\t5\tDallas\tUS\tCREDIT_CARD\t0.0
+1013\tCUST010\tPROD005\t2026-10-05\t2026-10-05 09:15:00\tPENDING\t349.00\t1\tSan Jose\tUS\tPAYPAL\t5.0
+1014\tCUST004\tPROD008\t2026-10-05\t2026-10-05 10:30:00\tDELIVERED\t74.99\t2\tHouston\tUS\tCREDIT_CARD\t0.0
+1015\tCUST005\tPROD009\t2026-10-05\t2026-10-05 13:00:00\tSHIPPED\t899.00\t1\tPhoenix\tUS\tDEBIT_CARD\t0.0
+1016\tCUST006\tPROD010\t2026-10-06\t2026-10-06 08:45:00\tDELIVERED\t149.99\t1\tPhiladelphia\tUS\tCREDIT_CARD\t20.0
+1017\tCUST001\tPROD006\t2026-10-06\t2026-10-06 09:30:00\tDELIVERED\t59.99\t2\tNew York\tUS\tPAYPAL\t0.0
+1018\tCUST007\tPROD001\t2026-10-06\t2026-10-06 14:15:00\tCONFIRMED\t1299.99\t1\tSan Antonio\tUS\tCREDIT_CARD\t5.0
+1019\tCUST008\tPROD003\t2026-10-07\t2026-10-07 08:00:00\tDELIVERED\t499.50\t1\tSan Diego\tUS\tDEBIT_CARD\t0.0
+1020\tCUST009\tPROD007\t2026-10-07\t2026-10-07 10:45:00\tSHIPPED\t199.00\t3\tDallas\tUS\tCREDIT_CARD\t10.0
+1021\tCUST010\tPROD002\t2026-10-07\t2026-10-07 12:00:00\tDELIVERED\t89.99\t1\tSan Jose\tUS\tPAYPAL\t0.0
+1022\tCUST002\tPROD009\t2026-10-08\t2026-10-08 09:00:00\tPENDING\t899.00\t1\tLos Angeles\tUS\tCREDIT_CARD\t0.0
+1023\tCUST003\tPROD010\t2026-10-08\t2026-10-08 11:30:00\tDELIVERED\t149.99\t2\tChicago\tUS\tDEBIT_CARD\t5.0
+1024\tCUST004\tPROD005\t2026-10-08\t2026-10-08 13:45:00\tCONFIRMED\t349.00\t1\tHouston\tUS\tCREDIT_CARD\t0.0
+1025\tCUST005\tPROD008\t2026-10-09\t2026-10-09 08:30:00\tDELIVERED\t74.99\t3\tPhoenix\tUS\tPAYPAL\t15.0
+1026\tCUST006\tPROD001\t2026-10-09\t2026-10-09 10:00:00\tSHIPPED\t1299.99\t1\tPhiladelphia\tUS\tCREDIT_CARD\t0.0
+1027\tCUST007\tPROD004\t2026-10-09\t2026-10-09 14:00:00\tDELIVERED\t24.99\t10\tSan Antonio\tUS\tDEBIT_CARD\t0.0
+1028\tCUST008\tPROD006\t2026-10-10\t2026-10-10 08:15:00\tDELIVERED\t59.99\t1\tSan Diego\tUS\tCREDIT_CARD\t5.0
+1029\tCUST009\tPROD002\t2026-10-10\t2026-10-10 09:45:00\tCANCELLED\t89.99\t2\tDallas\tUS\tPAYPAL\t0.0
+1030\tCUST010\tPROD003\t2026-10-10\t2026-10-10 11:30:00\tDELIVERED\t499.50\t1\tSan Jose\tUS\tCREDIT_CARD\t10.0"""
+
+CUSTOMERS_TSV = """customer_id\tfirst_name\tlast_name\temail\tphone\tdate_of_birth\tgender\tcity\tstate\tcountry\tpostal_code\tregistration_date\tloyalty_tier\ttotal_lifetime_value\tis_active
+CUST001\tJames\tAnderson\tjames.anderson@email.com\t+1-212-555-0101\t1985-03-15\tM\tNew York\tNY\tUS\t10001\t2023-01-10\tGOLD\t8750.50\ttrue
+CUST002\tSarah\tMartinez\tsarah.martinez@email.com\t+1-213-555-0102\t1990-07-22\tF\tLos Angeles\tCA\tUS\t90001\t2023-02-14\tSILVER\t3200.75\ttrue
+CUST003\tMichael\tJohnson\tmichael.johnson@email.com\t+1-312-555-0103\t1978-11-08\tM\tChicago\tIL\tUS\t60601\t2022-11-05\tGOLD\t12400.00\ttrue
+CUST004\tEmily\tWilliams\temily.williams@email.com\t+1-713-555-0104\t1995-04-30\tF\tHouston\tTX\tUS\t77001\t2023-06-20\tBRONZE\t980.25\ttrue
+CUST005\tDavid\tBrown\tdavid.brown@email.com\t+1-602-555-0105\t1982-09-12\tM\tPhoenix\tAZ\tUS\t85001\t2023-03-08\tSILVER\t4560.00\ttrue
+CUST006\tLisa\tDavis\tlisa.davis@email.com\t+1-215-555-0106\t1988-12-25\tF\tPhiladelphia\tPA\tUS\t19101\t2022-09-17\tGOLD\t9100.80\ttrue
+CUST007\tRobert\tWilson\trobert.wilson@email.com\t+1-210-555-0107\t1975-06-18\tM\tSan Antonio\tTX\tUS\t78201\t2023-01-28\tBRONZE\t1250.40\ttrue
+CUST008\tJennifer\tMoore\tjennifer.moore@email.com\t+1-619-555-0108\t1992-02-14\tF\tSan Diego\tCA\tUS\t92101\t2023-04-12\tSILVER\t5670.90\ttrue
+CUST009\tWilliam\tTaylor\twilliam.taylor@email.com\t+1-214-555-0109\t1980-08-05\tM\tDallas\tTX\tUS\t75201\t2022-12-01\tGOLD\t15800.25\ttrue
+CUST010\tAmanda\tThomas\tamanda.thomas@email.com\t+1-408-555-0110\t1997-01-19\tF\tSan Jose\tCA\tUS\t95101\t2023-07-04\tBRONZE\t450.00\ttrue"""
+
+PRODUCTS_TSV = """product_id\tproduct_name\tcategory\tsub_category\tbrand\tsku\tunit_price\tcost_price\tstock_quantity\treorder_level\tsupplier_id\tis_active\tcreated_date\tlast_updated
+PROD001\tMacBook Pro 14\tElectronics\tLaptops\tApple\tAPL-MBP14-2026\t1299.99\t950.00\t45\t10\tSUP001\ttrue\t2025-01-01\t2026-10-01
+PROD002\tWireless Headphones\tElectronics\tAudio\tSony\tSNY-WH1000XM6\t89.99\t45.00\t200\t50\tSUP002\ttrue\t2025-03-15\t2026-09-15
+PROD003\tStanding Desk\tFurniture\tOffice\tFlexiDesk\tFD-SD-001\t499.50\t280.00\t30\t8\tSUP003\ttrue\t2025-02-10\t2026-08-20
+PROD004\tMechanical Keyboard\tElectronics\tPeripherals\tLogitech\tLGT-MX-KEYS\t24.99\t12.00\t500\t100\tSUP002\ttrue\t2025-04-05\t2026-10-01
+PROD005\tErgonomic Chair\tFurniture\tOffice\tHermanMiller\tHM-AERON-B\t349.00\t200.00\t25\t5\tSUP003\ttrue\t2025-01-20\t2026-07-10
+PROD006\tUSB-C Hub\tElectronics\tAccessories\tAnker\tANK-A8352\t59.99\t25.00\t350\t80\tSUP004\ttrue\t2025-05-12\t2026-09-01
+PROD007\tMonitor 27 4K\tElectronics\tDisplays\tLG\tLG-27UK850\t199.00\t120.00\t60\t15\tSUP002\ttrue\t2025-03-01\t2026-10-01
+PROD008\tDesk Lamp LED\tHome\tLighting\tPhilips\tPHL-DL-LED\t74.99\t35.00\t150\t40\tSUP005\ttrue\t2025-06-08\t2026-09-20
+PROD009\tNoise Cancelling Earbuds\tElectronics\tAudio\tBose\tBSE-QC-45\t899.00\t550.00\t80\t20\tSUP001\ttrue\t2025-02-28\t2026-10-01
+PROD010\tWebcam HD 1080p\tElectronics\tPeripherals\tLogitech\tLGT-C920\t149.99\t70.00\t120\t30\tSUP002\ttrue\t2025-07-15\t2026-09-15"""
+
+# Write inline data directly to UC Volume using Python open()
+# UC Volumes support standard Python file I/O — no Spark/DBFS needed
+print("Writing TSV data to UC Volume...")
+print("-" * 60)
+
+for volume_dir, filename, data in [
+    (VOLUME_ORDERS,    "orders.tsv",    ORDERS_TSV),
+    (VOLUME_CUSTOMERS, "customers.tsv", CUSTOMERS_TSV),
+    (VOLUME_PRODUCTS,  "products.tsv",  PRODUCTS_TSV),
+]:
     os.makedirs(volume_dir, exist_ok=True)
     target = f"{volume_dir}/{filename}"
-
-    # sparkContext.textFile works on Repos paths (not treated as DBFS)
-    lines = spark.sparkContext.textFile(source).collect()
     with open(target, "w", encoding="utf-8") as f:
-        f.write("\n".join(lines))
-
+        f.write(data.strip())
     size = os.path.getsize(target)
     print(f"  ✓ {filename}  →  {target}  ({size:,} bytes)")
 
-print("Uploading TSV files to UC Volume...")
 print("-" * 60)
-
-upload_tsv_to_volume(BUNDLE_PATH, VOLUME_ORDERS,    "orders.tsv")
-upload_tsv_to_volume(BUNDLE_PATH, VOLUME_CUSTOMERS,  "customers.tsv")
-upload_tsv_to_volume(BUNDLE_PATH, VOLUME_PRODUCTS,   "products.tsv")
-
-print("-" * 60)
-print("\n✓ All TSV files uploaded to UC Volume")
+print("\n✓ All TSV data written to UC Volume")
 
 # COMMAND ----------
 # MAGIC %md
