@@ -1,0 +1,17 @@
+customer_id	first_name	last_name	email	phone	city	state	country	signup_date	loyalty_tier	total_orders	total_spent	active
+CUST-001	James	Anderson	james.anderson@email.com	+1-212-555-0101	New York	NY	USA	2024-01-15	GOLD	12	2849.88	true
+CUST-002	Sarah	Martinez	sarah.martinez@email.com	+1-310-555-0102	Los Angeles	CA	USA	2024-02-20	SILVER	8	1240.50	true
+CUST-003	Michael	Johnson	michael.j@email.com	+1-312-555-0103	Chicago	IL	USA	2024-01-08	GOLD	15	4120.75	true
+CUST-004	Emily	Williams	emily.w@email.com	+1-713-555-0104	Houston	TX	USA	2024-03-10	BRONZE	3	374.97	true
+CUST-005	David	Brown	david.brown@email.com	+1-602-555-0105	Phoenix	AZ	USA	2024-01-22	SILVER	7	1850.00	true
+CUST-006	Jessica	Davis	jessica.d@email.com	+1-215-555-0106	Philadelphia	PA	USA	2024-04-05	BRONZE	4	560.00	true
+CUST-007	Daniel	Wilson	daniel.w@email.com	+1-210-555-0107	San Antonio	TX	USA	2024-02-14	SILVER	6	1240.00	true
+CUST-008	Ashley	Taylor	ashley.t@email.com	+1-619-555-0108	San Diego	CA	USA	2024-05-01	BRONZE	2	698.00	true
+CUST-009	Christopher	Moore	chris.m@email.com	+1-214-555-0109	Dallas	TX	USA	2024-03-18	BRONZE	1	149.95	true
+CUST-010	Amanda	Jackson	amanda.j@email.com	+1-408-555-0110	San Jose	CA	USA	2024-01-30	GOLD	10	3200.00	true
+CUST-011	Matthew	White	matt.white@email.com	+1-512-555-0111	Austin	TX	USA	2024-06-12	BRONZE	1	89.50	true
+CUST-012	Stephanie	Harris	steph.h@email.com	+1-904-555-0112	Jacksonville	FL	USA	2024-04-25	SILVER	5	980.00	true
+CUST-013	Andrew	Martin	andrew.m@email.com	+1-817-555-0113	Fort Worth	TX	USA	2024-02-08	BRONZE	3	650.00	true
+CUST-014	Melissa	Garcia	melissa.g@email.com	+1-614-555-0114	Columbus	OH	USA	2024-05-20	BRONZE	2	420.00	true
+CUST-015	Joshua	Thompson	josh.t@email.com	+1-704-555-0115	Charlotte	NC	USA	2024-03-03	SILVER	6	1100.00	true
+CUST-016	Nicole	Robinson	nicole.r@email.com	+1-317-555-0116	Indianapolis	IN	USA	2024-01-19	GOLD	9	2500.00	true

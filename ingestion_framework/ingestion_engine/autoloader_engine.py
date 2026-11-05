@@ -295,10 +295,32 @@ class AutoLoaderEngine:
     # ------------------------------------------------------------------
 
     def _build_source_path(self, cfg: dict[str, Any]) -> str:
-        """Build the full s3://bucket/path/ URI from config components."""
-        bucket = cfg["s3_bucket"]
-        path   = cfg.get("s3_path", "").strip("/")
-        return f"s3://{bucket}/{path}/"
+        """
+        Build the source path from config.
+
+        Supports three source types:
+        - dbfs   : dbfs:/FileStore/... (demo / local Databricks)
+        - s3     : s3://bucket/path/   (production)
+        - abfss  : abfss://...         (Azure, future)
+
+        source_type is read from config (default: s3 for backward compat).
+        """
+        source_type = cfg.get("source_type", "s3").lower()
+
+        if source_type == "dbfs":
+            # DBFS path — used for demo without AWS
+            dbfs_path = cfg.get("dbfs_path", "").strip("/")
+            return f"dbfs:/{dbfs_path}/"
+
+        elif source_type == "abfss":
+            # Azure Data Lake — future support
+            return cfg.get("abfss_path", "")
+
+        else:
+            # Default: AWS S3
+            bucket = cfg["s3_bucket"]
+            path   = cfg.get("s3_path", "").strip("/")
+            return f"s3://{bucket}/{path}/"
 
     # ------------------------------------------------------------------
     # Metadata columns
@@ -355,21 +377,37 @@ class AutoLoaderEngine:
     def _validate_config(self, cfg: dict[str, Any]) -> None:
         """
         Validate required config keys and value constraints.
+        s3_bucket is only required when source_type = s3 (default).
 
         Raises
         ------
         ValueError
             If a required key is missing or has an unsupported value.
         """
-        required_keys = [
-            "dataset_name", "format", "load_type",
-            "s3_bucket", "s3_path", "target_table",
-        ]
-        for key in required_keys:
+        source_type = cfg.get("source_type", "s3").lower()
+
+        # Always required
+        always_required = ["dataset_name", "format", "load_type", "target_table"]
+        for key in always_required:
             if not cfg.get(key):
                 raise ValueError(
                     f"Missing required key '{key}' for dataset "
                     f"'{cfg.get('dataset_name', 'UNKNOWN')}'"
+                )
+
+        # Source-type specific required keys
+        if source_type == "s3":
+            for key in ("s3_bucket", "s3_path"):
+                if not cfg.get(key):
+                    raise ValueError(
+                        f"Missing '{key}' — required when source_type=s3. "
+                        f"Dataset: '{cfg.get('dataset_name')}'"
+                    )
+        elif source_type == "dbfs":
+            if not cfg.get("dbfs_path"):
+                raise ValueError(
+                    f"Missing 'dbfs_path' — required when source_type=dbfs. "
+                    f"Dataset: '{cfg.get('dataset_name')}'"
                 )
 
         fmt = cfg["format"].lower()

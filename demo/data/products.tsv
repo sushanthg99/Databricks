@@ -1,0 +1,9 @@
+product_id	product_name	category	sub_category	brand	unit_price	cost_price	currency	stock_quantity	reorder_level	supplier_id	sku	active	created_date
+PROD-101	Wireless Noise Cancelling Headphones	Electronics	Audio	SoundMax	124.99	65.00	USD	450	50	SUP-001	SKU-WNC-001	true	2024-01-01
+PROD-102	Ergonomic Office Chair	Furniture	Seating	ComfortPlus	89.50	42.00	USD	120	20	SUP-002	SKU-EOC-002	true	2024-01-01
+PROD-103	4K Ultra HD Monitor 27inch	Electronics	Displays	ViewPro	333.00	180.00	USD	85	15	SUP-001	SKU-4KM-003	true	2024-01-15
+PROD-104	Mechanical Gaming Keyboard	Electronics	Input Devices	TechGear	799.00	420.00	USD	200	30	SUP-003	SKU-MGK-004	true	2024-01-15
+PROD-105	Stainless Steel Water Bottle	Home & Kitchen	Drinkware	HydroLife	59.99	18.00	USD	800	100	SUP-004	SKU-SWB-005	true	2024-02-01
+PROD-106	Yoga Mat Premium	Sports	Exercise	FitPro	349.00	180.00	USD	300	40	SUP-005	SKU-YMP-006	true	2024-02-01
+PROD-107	Portable Bluetooth Speaker	Electronics	Audio	SoundMax	149.95	75.00	USD	350	50	SUP-001	SKU-PBS-007	true	2024-02-15
+PROD-108	Bamboo Cutting Board Set	Home & Kitchen	Cookware	EcoKitchen	16.25	6.50	USD	600	80	SUP-004	SKU-BCB-008	true	2024-02-15
