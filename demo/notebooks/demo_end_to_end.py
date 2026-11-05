@@ -78,6 +78,12 @@ print("=" * 65)
 # MAGIC ## Step 1 — Setup: Create Metadata Tables and Bronze Schema
 
 # COMMAND ----------
+# MAGIC %load_ext autoreload
+
+# COMMAND ----------
+# MAGIC %autoreload 2
+
+# COMMAND ----------
 
 import logging
 logging.basicConfig(
@@ -85,10 +91,6 @@ logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s"
 )
 logger = logging.getLogger("demo_notebook")
-
-# Force reload of all modules — picks up latest code without kernel restart
-%load_ext autoreload
-%autoreload 2
 
 print("Creating schemas...")
 spark.sql(f"CREATE SCHEMA IF NOT EXISTS {CATALOG}.{METADATA_SCHEMA} COMMENT 'Demo ingestion metadata'")
@@ -469,7 +471,6 @@ if BUNDLE_PATH not in sys.path:
     sys.path.insert(0, BUNDLE_PATH)
 
 from ingestion_framework.ingestion_engine.autoloader_engine import AutoLoaderEngine
-from ingestion_framework.ingestion_engine.schema_registry import SchemaRegistry
 
 env_config = {
     "environment": ENVIRONMENT,
