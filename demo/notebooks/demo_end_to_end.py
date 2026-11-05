@@ -92,6 +92,13 @@ print(f"  ✓ {CATALOG}.{METADATA_SCHEMA}")
 spark.sql(f"CREATE SCHEMA IF NOT EXISTS {CATALOG}.{BRONZE_SCHEMA} COMMENT 'Demo Bronze Delta tables'")
 print(f"  ✓ {CATALOG}.{BRONZE_SCHEMA}")
 
+# Drop and recreate metadata tables to ensure schema is always up to date
+print("\nRecreating metadata tables with latest schema...")
+for tbl in ["ingestion_config", "dataset_registry", "dataset_tags",
+            "ingestion_runtime_state", "schema_registry", "dq_sla_config"]:
+    spark.sql(f"DROP TABLE IF EXISTS {CATALOG}.{METADATA_SCHEMA}.{tbl}")
+    print(f"  dropped: {tbl}")
+
 # COMMAND ----------
 
 # ── dataset_registry ───────────────────────────────────────────────────────────
@@ -474,6 +481,15 @@ print(f"  Run mode      : full")
 print("=" * 65)
 
 ingestion = BronzeIngestion(spark=spark, dbutils=dbutils)
+
+# Debug: verify datasets are registered before running ingestion
+print("Active datasets in metadata:")
+spark.sql(f"""
+    SELECT dr.dataset_name, ic.load_type, ic.source_type, ic.volume_path, ic.target_table
+    FROM {CATALOG}.{METADATA_SCHEMA}.dataset_registry dr
+    JOIN {CATALOG}.{METADATA_SCHEMA}.ingestion_config ic ON dr.dataset_id = ic.dataset_id
+    WHERE dr.active = true AND dr.data_tier = 'bronze' AND ic.environment = '{ENVIRONMENT}'
+""").show(truncate=False)
 
 summary = ingestion.run(
     source_system   = SOURCE_SYSTEM,
