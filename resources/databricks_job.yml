@@ -50,16 +50,22 @@ resources:
       # Maximum concurrent runs — typically 1 for ingestion jobs
       max_concurrent_runs: 1
 
-      # Job-level parameters (defaults; can be overridden at runtime)
+      # Job-level parameters (defaults driven by bundle variables per target)
       parameters:
         - name: source_system
           default: ecommerce
         - name: environment
-          default: dev
+          default: ${var.environment}       # dev | uat | prod — set per target
         - name: run_mode
           default: incremental
         - name: dataset_name
-          default: ""                   # Empty = run all active datasets
+          default: ""                       # Empty = run all active datasets
+        - name: catalog_name
+          default: ${var.catalog_name}      # dev_catalog | uat_catalog | prod_catalog
+        - name: metadata_schema
+          default: ${var.metadata_schema}   # ingestion_metadata
+        - name: log_level
+          default: ${var.log_level}         # DEBUG (dev) | INFO (uat/prod)
 
       # -----------------------------------------------------------------------
       # Serverless Compute
@@ -88,7 +94,10 @@ resources:
               run_mode: metadata_only
               source_system: "{{job.parameters.source_system}}"
               environment: "{{job.parameters.environment}}"
+              catalog_name: "{{job.parameters.catalog_name}}"
+              metadata_schema: "{{job.parameters.metadata_schema}}"
               dataset_name: "{{job.parameters.dataset_name}}"
+              log_level: "{{job.parameters.log_level}}"
 
           # Task-level timeout — metadata registration should be fast
           timeout_seconds: 600
@@ -116,7 +125,10 @@ resources:
               run_mode: "{{job.parameters.run_mode}}"
               source_system: "{{job.parameters.source_system}}"
               environment: "{{job.parameters.environment}}"
+              catalog_name: "{{job.parameters.catalog_name}}"
+              metadata_schema: "{{job.parameters.metadata_schema}}"
               dataset_name: "{{job.parameters.dataset_name}}"
+              log_level: "{{job.parameters.log_level}}"
 
           timeout_seconds: 10800    # 3 hours for large ingestion runs
           max_retries: 1

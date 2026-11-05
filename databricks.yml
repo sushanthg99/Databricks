@@ -37,9 +37,17 @@ variables:
     description: "Prefix for Bronze Delta schemas (e.g. ecommerce_bronze)"
     default: "bronze"
 
-  job_cluster_key:
-    description: "Reference key for the job cluster definition"
-    default: "ingestion_cluster"
+  environment:
+    description: "Target environment name — passed to notebooks at runtime"
+    default: "dev"
+
+  s3_source_bucket:
+    description: "Source S3 bucket name for this environment"
+    default: "<PLACEHOLDER_DEV_S3_BUCKET_NAME>"
+
+  log_level:
+    description: "Logging verbosity: DEBUG (dev) | INFO (uat/prod)"
+    default: "DEBUG"
 
 # -----------------------------------------------------------------------------
 # Workspace sync — files deployed to workspace
@@ -83,11 +91,13 @@ targets:
     default: true
     workspace:
       host: https://dbc-15fc2096-517b.cloud.databricks.com
-      # Token resolved from DATABRICKS_TOKEN env var or ~/.databrickscfg
     variables:
+      environment: dev
       catalog_name: dev_catalog
       metadata_schema: ingestion_metadata
       bronze_schema_prefix: bronze
+      s3_source_bucket: <PLACEHOLDER_DEV_S3_BUCKET_NAME>
+      log_level: DEBUG
 
   # --- User Acceptance Testing ---
   uat:
@@ -95,9 +105,12 @@ targets:
     workspace:
       host: <PLACEHOLDER_UAT_WORKSPACE_HOST>
     variables:
+      environment: uat
       catalog_name: uat_catalog
       metadata_schema: ingestion_metadata
       bronze_schema_prefix: bronze
+      s3_source_bucket: <PLACEHOLDER_UAT_S3_BUCKET_NAME>
+      log_level: INFO
 
   # --- Production ---
   prod:
@@ -105,8 +118,9 @@ targets:
     workspace:
       host: <PLACEHOLDER_PROD_WORKSPACE_HOST>
     variables:
+      environment: prod
       catalog_name: prod_catalog
       metadata_schema: ingestion_metadata
       bronze_schema_prefix: bronze
-    # Production deployments should require explicit approval
-    # Configure via Databricks workspace permissions, not in this file
+      s3_source_bucket: <PLACEHOLDER_PROD_S3_BUCKET_NAME>
+      log_level: INFO
