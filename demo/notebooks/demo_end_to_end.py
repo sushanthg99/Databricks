@@ -165,40 +165,58 @@ spark.sql(f"SHOW TABLES IN {CATALOG}.{METADATA_SCHEMA}").show()
 # MAGIC ---
 # MAGIC ## Step 2 — Upload TSV Files to Unity Catalog Volume
 # MAGIC
-# MAGIC Copies TSV files from the bundle workspace path into the UC Volume.
-# MAGIC The volume path `/Volumes/workspace/ingestion_metadata/demo_volume/data/`
-# MAGIC acts as our source "landing zone" — replacing DBFS and S3 for this demo.
+# MAGIC Reads TSV files using Spark (Repos files aren't accessible via Python file I/O)
+# MAGIC and writes them to the UC Volume as the ingestion source.
 
 # COMMAND ----------
 
-import shutil, os
+import os
 
-def upload_to_volume(bundle_path: str, volume_dir: str, filename: str):
-    """Copy a TSV file from bundle workspace to UC Volume using Python file I/O."""
-    source = f"{bundle_path}/demo/data/{filename}"
+def upload_tsv_to_volume(repo_path: str, volume_dir: str, filename: str):
+    """
+    Read a TSV file from the Repo using Spark and write it to a UC Volume.
+    Uses spark.read (not Python open()) because Repo files are workspace objects.
+    """
+    source = f"{repo_path}/demo/data/{filename}"
     os.makedirs(volume_dir, exist_ok=True)
     target = f"{volume_dir}/{filename}"
-    shutil.copy2(source, target)
-    size = os.path.getsize(target)
-    print(f"  ✓ {filename}  →  {target}  ({size:,} bytes)")
+
+    # Read via Spark and write as a single file to the volume
+    (
+        spark.read
+        .option("header", "true")
+        .option("delimiter", "\t")
+        .option("inferSchema", "true")
+        .csv(source)
+        .coalesce(1)                    # write as single file
+        .write
+        .mode("overwrite")
+        .option("header", "true")
+        .option("delimiter", "\t")
+        .csv(volume_dir + f"/_tmp_{filename}")
+    )
+
+    # Rename the part file to the expected filename
+    import glob
+    part_files = glob.glob(f"{volume_dir}/_tmp_{filename}/part-*.csv")
+    if part_files:
+        import shutil
+        shutil.copy(part_files[0], target)
+        shutil.rmtree(f"{volume_dir}/_tmp_{filename}", ignore_errors=True)
+        size = os.path.getsize(target)
+        print(f"  ✓ {filename}  →  {target}  ({size:,} bytes)")
+    else:
+        raise FileNotFoundError(f"No part file found after writing {filename}")
 
 print("Uploading TSV files to UC Volume...")
 print("-" * 60)
 
-upload_to_volume(BUNDLE_PATH, VOLUME_ORDERS,    "orders.tsv")
-upload_to_volume(BUNDLE_PATH, VOLUME_CUSTOMERS,  "customers.tsv")
-upload_to_volume(BUNDLE_PATH, VOLUME_PRODUCTS,   "products.tsv")
+upload_tsv_to_volume(BUNDLE_PATH, VOLUME_ORDERS,    "orders.tsv")
+upload_tsv_to_volume(BUNDLE_PATH, VOLUME_CUSTOMERS,  "customers.tsv")
+upload_tsv_to_volume(BUNDLE_PATH, VOLUME_PRODUCTS,   "products.tsv")
 
 print("-" * 60)
 print("\n✓ All TSV files uploaded to UC Volume")
-
-# Verify
-print("\nVerifying files in volume:")
-for d, label in [(VOLUME_ORDERS, "orders"), (VOLUME_CUSTOMERS, "customers"), (VOLUME_PRODUCTS, "products")]:
-    files = os.listdir(d)
-    for f in files:
-        size = os.path.getsize(f"{d}/{f}")
-        print(f"  {label}/{f}  ({size:,} bytes)")
 
 # COMMAND ----------
 # MAGIC %md
