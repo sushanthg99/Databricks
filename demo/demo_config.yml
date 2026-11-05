@@ -57,8 +57,8 @@ datasets:
     load_type: full
 
     # Auto Loader schema + checkpoint volumes (used if switching to incremental)
-    schema_location: /Volumes/hive_metastore/demo_bronze/autoloader_volume/schemas/orders/
-    checkpoint_location: /Volumes/hive_metastore/demo_bronze/autoloader_volume/checkpoints/orders/
+    schema_location: /Volumes/workspace/demo_bronze/autoloader_volume/schemas/orders/
+    checkpoint_location: /Volumes/workspace/demo_bronze/autoloader_volume/checkpoints/orders/
 
     # Primary key for Silver MERGE (future)
     primary_keys:
@@ -133,8 +133,8 @@ datasets:
     load_type: full
 
     # Auto Loader locations
-    schema_location: /Volumes/hive_metastore/demo_bronze/autoloader_volume/schemas/customers/
-    checkpoint_location: /Volumes/hive_metastore/demo_bronze/autoloader_volume/checkpoints/customers/
+    schema_location: /Volumes/workspace/demo_bronze/autoloader_volume/schemas/customers/
+    checkpoint_location: /Volumes/workspace/demo_bronze/autoloader_volume/checkpoints/customers/
 
     primary_keys:
       - customer_id
@@ -205,8 +205,8 @@ datasets:
     load_type: full
 
     # Auto Loader locations
-    schema_location: /Volumes/hive_metastore/demo_bronze/autoloader_volume/schemas/products/
-    checkpoint_location: /Volumes/hive_metastore/demo_bronze/autoloader_volume/checkpoints/products/
+    schema_location: /Volumes/workspace/demo_bronze/autoloader_volume/schemas/products/
+    checkpoint_location: /Volumes/workspace/demo_bronze/autoloader_volume/checkpoints/products/
 
     primary_keys:
       - product_id

@@ -94,7 +94,7 @@ targets:
       host: https://dbc-15fc2096-517b.cloud.databricks.com
     variables:
       environment: dev
-      catalog_name: dev_catalog
+      catalog_name: workspace
       metadata_schema: ingestion_metadata
       bronze_schema_prefix: bronze
       s3_source_bucket: <PLACEHOLDER_DEV_S3_BUCKET_NAME>

@@ -1,24 +1,21 @@
 -- =============================================================================
 -- Demo Metadata Tables DDL
--- Dynamic Databricks Ingestion Framework — Demo Mode (No S3 / No Unity Catalog)
+-- Dynamic Databricks Ingestion Framework — Demo Mode (No S3)
 -- =============================================================================
 --
 -- PURPOSE:
---   Creates all 7 metadata tables in hive_metastore (default catalog).
---   Use this script when you don't have Unity Catalog or AWS S3 yet.
---   Once you have Unity Catalog, use sql/metadata_tables.sql instead.
+--   Creates all 7 metadata tables in the `workspace` Unity Catalog.
+--   Use this script for your current Databricks workspace.
+--   hive_metastore is DISABLED in this workspace — all tables use Unity Catalog.
 --
--- CATALOG  : hive_metastore  (Databricks default, always available)
+-- CATALOG  : workspace  (your Unity Catalog)
 -- SCHEMA   : ingestion_metadata
 --
 -- HOW TO RUN:
 --   1. Open Databricks SQL Editor
---   2. Select "hive_metastore" as the catalog
+--   2. Make sure catalog = workspace is selected
 --   3. Run this entire script top to bottom
---   4. Verify: SHOW TABLES IN hive_metastore.ingestion_metadata;
---
--- EXECUTION ORDER:
---   Run all statements in order — each section is clearly labelled.
+--   4. Verify: SHOW TABLES IN workspace.ingestion_metadata;
 -- =============================================================================
 
 
@@ -26,7 +23,7 @@
 -- STEP 1: Create the metadata schema
 -- =============================================================================
 
-CREATE SCHEMA IF NOT EXISTS hive_metastore.ingestion_metadata
+CREATE SCHEMA IF NOT EXISTS workspace.ingestion_metadata
   COMMENT 'Demo ingestion framework metadata tables';
 
 
@@ -35,7 +32,7 @@ CREATE SCHEMA IF NOT EXISTS hive_metastore.ingestion_metadata
 -- Master registry of all datasets managed by the framework.
 -- =============================================================================
 
-CREATE TABLE IF NOT EXISTS hive_metastore.ingestion_metadata.dataset_registry (
+CREATE TABLE IF NOT EXISTS workspace.ingestion_metadata.dataset_registry (
   dataset_id            STRING      COMMENT 'Deterministic UUID v5: hash(source_system::dataset_name)',
   dataset_name          STRING      COMMENT 'Logical dataset name (e.g. orders, customers)',
   version               STRING      COMMENT 'Dataset schema version (e.g. 1.0)',
@@ -64,7 +61,7 @@ TBLPROPERTIES (
 -- Key-value tag store per dataset.
 -- =============================================================================
 
-CREATE TABLE IF NOT EXISTS hive_metastore.ingestion_metadata.dataset_tags (
+CREATE TABLE IF NOT EXISTS workspace.ingestion_metadata.dataset_tags (
   dataset_id   STRING     COMMENT 'FK → dataset_registry.dataset_id',
   tag_key      STRING     COMMENT 'Tag name (e.g. domain, owner, retention_days)',
   tag_value    STRING     COMMENT 'Tag value',
@@ -83,7 +80,7 @@ TBLPROPERTIES (
 -- Upstream/downstream dataset relationships.
 -- =============================================================================
 
-CREATE TABLE IF NOT EXISTS hive_metastore.ingestion_metadata.dataset_dependencies (
+CREATE TABLE IF NOT EXISTS workspace.ingestion_metadata.dataset_dependencies (
   dependency_id           STRING     COMMENT 'UUID — unique dependency identifier',
   upstream_dataset_id     STRING     COMMENT 'FK → dataset_registry.dataset_id (source)',
   downstream_dataset_id   STRING     COMMENT 'FK → dataset_registry.dataset_id (target)',
@@ -103,7 +100,7 @@ TBLPROPERTIES (
 -- Primary ingestion configuration per dataset per environment.
 -- =============================================================================
 
-CREATE TABLE IF NOT EXISTS hive_metastore.ingestion_metadata.ingestion_config (
+CREATE TABLE IF NOT EXISTS workspace.ingestion_metadata.ingestion_config (
   config_id             STRING     COMMENT 'UUID — unique config identifier',
   dataset_id            STRING     COMMENT 'FK → dataset_registry.dataset_id',
   environment           STRING     COMMENT 'dev | uat | prod',
@@ -152,7 +149,7 @@ TBLPROPERTIES (
 -- Append-only run history — one row per dataset per run.
 -- =============================================================================
 
-CREATE TABLE IF NOT EXISTS hive_metastore.ingestion_metadata.ingestion_runtime_state (
+CREATE TABLE IF NOT EXISTS workspace.ingestion_metadata.ingestion_runtime_state (
   run_id                STRING     COMMENT 'Job run UUID',
   dataset_id            STRING     COMMENT 'FK → dataset_registry.dataset_id',
   environment           STRING     COMMENT 'dev | uat | prod',
@@ -180,7 +177,7 @@ TBLPROPERTIES (
 -- Data Quality rule definitions and SLA thresholds per dataset.
 -- =============================================================================
 
-CREATE TABLE IF NOT EXISTS hive_metastore.ingestion_metadata.dq_sla_config (
+CREATE TABLE IF NOT EXISTS workspace.ingestion_metadata.dq_sla_config (
   dq_rule_id            STRING       COMMENT 'UUID — unique DQ rule identifier',
   dataset_id            STRING       COMMENT 'FK → dataset_registry.dataset_id',
   rule_name             STRING       COMMENT 'Human-readable rule name',
@@ -209,7 +206,7 @@ TBLPROPERTIES (
 -- Versioned schema history per dataset.
 -- =============================================================================
 
-CREATE TABLE IF NOT EXISTS hive_metastore.ingestion_metadata.schema_registry (
+CREATE TABLE IF NOT EXISTS workspace.ingestion_metadata.schema_registry (
   schema_version_id   STRING     COMMENT 'UUID — unique schema version identifier',
   dataset_id          STRING     COMMENT 'FK → dataset_registry.dataset_id',
   version_number      INT        COMMENT 'Incrementing version (1, 2, 3, ...)',
@@ -232,15 +229,15 @@ TBLPROPERTIES (
 -- STEP 2: Verify all tables were created
 -- =============================================================================
 
-SHOW TABLES IN hive_metastore.ingestion_metadata;
+SHOW TABLES IN workspace.ingestion_metadata;
 
 
 -- =============================================================================
 -- STEP 3: Create Bronze schema for demo datasets
 -- =============================================================================
 
-CREATE SCHEMA IF NOT EXISTS hive_metastore.demo_bronze
+CREATE SCHEMA IF NOT EXISTS workspace.demo_bronze
   COMMENT 'Demo Bronze Delta tables — ecommerce raw data';
 
 -- Verify
-SHOW SCHEMAS IN hive_metastore LIKE 'demo*';
+SHOW SCHEMAS IN workspace LIKE 'demo*';

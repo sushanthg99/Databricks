@@ -11,12 +11,15 @@
 # MAGIC
 # MAGIC | Step | Action |
 # MAGIC |---|---|
-# MAGIC | **Step 1** | Setup — create metadata tables + Bronze schema in hive_metastore |
+# MAGIC | **Step 1** | Setup — create metadata tables + Bronze schema in Unity Catalog (`workspace`) |
 # MAGIC | **Step 2** | Upload TSV files to DBFS |
 # MAGIC | **Step 3** | Register dataset configs into metadata tables (metadata loader) |
 # MAGIC | **Step 4** | Run Bronze ingestion for all 3 datasets |
 # MAGIC | **Step 5** | Verify — query Bronze tables and show results |
 # MAGIC | **Step 6** | View metadata tables — registry, config, runtime state, schema |
+# MAGIC
+# MAGIC ## Catalog used: `workspace` (Unity Catalog)
+# MAGIC `hive_metastore` is disabled in this workspace — all tables go into `workspace` catalog.
 # MAGIC
 # MAGIC ## Datasets
 # MAGIC | Dataset | Rows | Format | Load type |
@@ -37,7 +40,7 @@
 # COMMAND ----------
 
 # ── Configuration ──────────────────────────────────────────────────────────────
-CATALOG          = "hive_metastore"       # Default Databricks catalog — no Unity Catalog needed
+CATALOG          = "workspace"            # Unity Catalog — your workspace catalog
 METADATA_SCHEMA  = "ingestion_metadata"   # Schema for framework metadata tables
 BRONZE_SCHEMA    = "demo_bronze"          # Schema for Bronze Delta tables
 ENVIRONMENT      = "dev"
