@@ -42,6 +42,10 @@ if repo_root not in sys.path:
     sys.path.insert(0, repo_root)
 print("repo_root:", repo_root)
 
+# drop any cached copy of the framework so edits pulled from Git take effect without a cluster restart
+for _m in [m for m in sys.modules if m == "ingestion_framework" or m.startswith("ingestion_framework.")]:
+    del sys.modules[_m]
+
 from ingestion_framework.tm1.manifest import resolve_run_dir
 from ingestion_framework.tm1.pipeline import TM1Pipeline, stage_run
 
