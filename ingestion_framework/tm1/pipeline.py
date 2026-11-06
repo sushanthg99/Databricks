@@ -142,21 +142,17 @@ class TM1Pipeline:
 
     def _write_run(self, df: DataFrame, fqn: str) -> int:
         """Idempotent per-run write: replace only this run's partition of rows."""
-        df = df.cache()
-        n = df.count()
+        n = df.count()  # no cache(): PERSIST is not supported on serverless compute
         w = df.write.format("delta")
         if self._exists(fqn):
             w.mode("overwrite").option("replaceWhere", f"_run_id = '{self.run_id}'").saveAsTable(fqn)
         else:
             w.mode("overwrite").saveAsTable(fqn)
-        df.unpersist()
         return n
 
     def _overwrite(self, df: DataFrame, fqn: str) -> int:
-        df = df.cache()
         n = df.count()
         df.write.format("delta").mode("overwrite").option("overwriteSchema", "true").saveAsTable(fqn)
-        df.unpersist()
         return n
 
     # ----------------------------------------------------------------- intake
@@ -183,7 +179,9 @@ class TM1Pipeline:
             if prefix in BRONZE_TABLE_FOR_PREFIX:
                 df = (self.spark.read.format("csv")
                       .option("header", "true").option("sep", "\t").option("encoding", "UTF-8")
-                      .option("inferSchema", "false").load(path))
+                      .option("inferSchema", "false")
+                      .option("quote", "").option("multiLine", "false")  # values contain bare " characters
+                      .load(path))
                 df = df.select(
                     *[F.col(f"`{c}`").alias(snake(c)) for c in df.columns],
                     F.lit(self.run_id).alias("_run_id"),
@@ -213,8 +211,35 @@ class TM1Pipeline:
                 [tuple(e[f.name] for f in edge_schema.fields) for e in edges], edge_schema)
                .withColumn("_run_id", F.lit(self.run_id)).withColumn("_ingested_at", F.current_timestamp()))
         counts["bronze_hierarchy_edges"] = self._write_run(edf, self.t(self.bronze, "bronze_hierarchy_edges"))
+        self.verify_bronze(counts)
         self._log("bronze", "OK", rows=sum(counts.values()), message=str(counts))
         return counts
+
+    def verify_bronze(self, counts: dict[str, int] | None = None) -> list[dict[str, Any]]:
+        """Reconcile Bronze row counts for this run against the manifest. Raises on any mismatch."""
+        rows, bad = [], []
+        for f in self.manifest()["files"]:
+            name = f["file_name"]
+            prefix = name.rsplit(f"_{self.run_id}", 1)[0]
+            if prefix in BRONZE_TABLE_FOR_PREFIX:
+                table = BRONZE_TABLE_FOR_PREFIX[prefix]
+                actual = self._b(table).count()
+            elif prefix in HIERARCHY_PREFIXES:
+                table = "bronze_hierarchy_edges"
+                actual = (self._b(table).where(F.col("hierarchy_kind") == HIERARCHY_PREFIXES[prefix])
+                          .select("dimension", "hierarchy_name").distinct().count())
+            else:
+                continue
+            ok = actual == f["row_count"]
+            rows.append({"file": name, "table": table, "manifest_rows": f["row_count"],
+                         "bronze_rows": actual, "match": ok})
+            if not ok:
+                bad.append(f"{name}: manifest {f['row_count']} vs bronze {actual}")
+        if bad:
+            self._log("bronze_verify", "FAILED", message="; ".join(bad)[:4000])
+            raise RuntimeError("Bronze reconciliation failed: " + "; ".join(bad))
+        self._log("bronze_verify", "OK", rows=sum(r["bronze_rows"] for r in rows))
+        return rows
 
     def _b(self, name: str) -> DataFrame:
         return self.spark.table(self.t(self.bronze, name)).where(F.col("_run_id") == self.run_id)
@@ -356,7 +381,6 @@ class TM1Pipeline:
         flagged = typed
         for name, sev, bad in failed_arrays:
             flagged = flagged.withColumn(f"_f_{name}", bad)
-        flagged = flagged.cache()
         for name, sev, _ in failed_arrays:
             n_bad = flagged.where(F.col(f"_f_{name}")).count()
             pct = (100.0 * n_bad / total) if total else 0.0
@@ -387,7 +411,6 @@ class TM1Pipeline:
         n_quarantine = self._overwrite(failing, self.t(self.silver, "silver_pnl_fact_quarantine"))
         breached = [r for r in results if r[8]]
         n_ok = self._overwrite(passing, self.t(self.silver, "silver_pnl_fact"))
-        flagged.unpersist()
         if breached:
             msg = ", ".join(f"{r[2]}={r[6]:.2f}%" for r in breached)
             self._log("silver_dq", "BREACH", rows=n_quarantine, message=msg)

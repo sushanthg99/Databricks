@@ -14,8 +14,8 @@ dbutils.widgets.text("metadata_schema", "ingestion_metadata", "Metadata schema")
 dbutils.widgets.text("landing_schema", "tm1_landing", "Landing schema (holds the volume)")
 dbutils.widgets.text("landing_volume", "landing", "Landing volume")
 dbutils.widgets.text("run_id", "RUN001", "Run id")
-dbutils.widgets.dropdown("stage", "all",
-    ["all", "stage_landing", "intake", "bronze", "silver", "security", "gold"], "Stage")
+dbutils.widgets.dropdown("stage", "through_bronze",
+    ["through_bronze", "all", "stage_landing", "intake", "bronze", "silver", "security", "gold"], "Stage")
 dbutils.widgets.dropdown("stage_from_repo", "false", ["true", "false"],
     "Copy demo data from repo into the volume first")
 dbutils.widgets.text("admin_group", "tm1_admins", "Group that bypasses row filter / mask")
@@ -58,7 +58,7 @@ pipe = TM1Pipeline(
 
 # COMMAND ----------
 
-if p["stage"] in ("all", "stage_landing"):
+if p["stage"] in ("all", "through_bronze", "stage_landing"):
     spark.sql(f"CREATE SCHEMA IF NOT EXISTS {p['catalog_name']}.{p['landing_schema']}")
     spark.sql(f"CREATE VOLUME IF NOT EXISTS {p['catalog_name']}.{p['landing_schema']}.{p['landing_volume']}")
     if p["stage_from_repo"] == "true":
@@ -71,8 +71,17 @@ if p["stage"] in ("all", "stage_landing"):
 
 # COMMAND ----------
 
+import os
 stage = p["stage"]
-if stage == "all":
+if stage != "stage_landing" and not any(n.startswith("_READY_") for n in (os.listdir(landing_dir) if os.path.isdir(landing_dir) else [])):
+    raise FileNotFoundError(
+        f"No _READY_*.json manifest in {landing_dir}. Upload the run folder contents to that volume path "
+        f"(Catalog > {p['catalog_name']} > {p['landing_schema']} > {p['landing_volume']} > Upload) or set stage_from_repo=true.")
+
+if stage == "through_bronze":
+    pipe.intake()
+    print(pipe.bronze_load())
+elif stage == "all":
     result = pipe.run_all()
     print(result)
 elif stage == "intake":
@@ -90,6 +99,14 @@ elif stage == "gold":
 # COMMAND ----------
 
 # MAGIC %md ## Verify
+
+# COMMAND ----------
+
+if stage in ("through_bronze", "bronze", "all"):
+    # reconciliation: Bronze rows vs the manifest row_count of every file
+    display(spark.createDataFrame(pipe.verify_bronze()))
+    display(spark.sql(f"SHOW TABLES IN {p['catalog_name']}.{pipe.bronze}"))
+    display(spark.table(pipe.t(pipe.bronze, "bronze_pnl_fact")).limit(10))
 
 # COMMAND ----------
 
