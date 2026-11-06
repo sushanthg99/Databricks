@@ -42,9 +42,13 @@ if repo_root not in sys.path:
     sys.path.insert(0, repo_root)
 print("repo_root:", repo_root)
 
+from ingestion_framework.tm1.manifest import resolve_run_dir
 from ingestion_framework.tm1.pipeline import TM1Pipeline, stage_run
 
-landing_dir = f"/Volumes/{p['catalog_name']}/{p['landing_schema']}/{p['landing_volume']}/{p['run_id']}"
+landing_base = f"/Volumes/{p['catalog_name']}/{p['landing_schema']}/{p['landing_volume']}/{p['run_id']}"
+# tolerate nested uploads: use the folder that really contains _READY_<run_id>.json
+landing_dir = resolve_run_dir(landing_base, p["run_id"])
+print("landing_dir:", landing_dir)
 pipe = TM1Pipeline(
     spark, catalog=p["catalog_name"], landing_dir=landing_dir, run_id=p["run_id"],
     meta_schema=p["metadata_schema"], admin_group=p["admin_group"],
@@ -62,8 +66,8 @@ if p["stage"] in ("all", "through_bronze", "stage_landing"):
     spark.sql(f"CREATE SCHEMA IF NOT EXISTS {p['catalog_name']}.{p['landing_schema']}")
     spark.sql(f"CREATE VOLUME IF NOT EXISTS {p['catalog_name']}.{p['landing_schema']}.{p['landing_volume']}")
     if p["stage_from_repo"] == "true":
-        stage_run(f"{repo_root}/demo/tm1_mock_data/{p['run_id']}", landing_dir)
-        print("staged to", landing_dir)
+        stage_run(f"{repo_root}/demo/tm1_mock_data/{p['run_id']}", landing_base)
+        print("staged to", landing_base)
 
 # COMMAND ----------
 
