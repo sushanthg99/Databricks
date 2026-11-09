@@ -121,42 +121,42 @@ jobs:
         env:
           DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
           DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+          REPO_PATH_EXPECTED: /Repos/${{ secrets.DATABRICKS_USER_EMAIL }}/Databricks
+          REPO_URL: https://github.com/${{ github.repository }}.git
         run: |
-          REPO_PATH="/Repos/${{ secrets.DATABRICKS_USER_EMAIL }}/Databricks"
-          REPO_URL="https://github.com/${{ github.repository }}.git"
+          set -euo pipefail
+          echo "Commit being synced : ${GITHUB_SHA}"
+          echo "Expected repo path  : ${REPO_PATH_EXPECTED}"
+          echo "Token belongs to    : $(databricks current-user me --output json | python3 -c 'import sys,json; print(json.load(sys.stdin).get("userName"))')"
 
-          echo "Syncing Repos UI at: $REPO_PATH"
+          databricks repos list --output json > repos.json
+          [ -s repos.json ] || echo '[]' > repos.json
+          echo "Repos visible to this token:"
+          python3 - <<'PY'
+          import json
+          for r in json.load(open("repos.json")) or []:
+              print("  id=%s path=%s url=%s branch=%s head=%s" % (
+                  r.get("id"), r.get("path"), r.get("url"), r.get("branch"), (r.get("head_commit_id") or "")[:7]))
+          PY
 
-          # Find existing repo ID
-          REPO_ID=$(databricks repos list --output json 2>/dev/null | \
-            python3 -c "
-          import sys, json
-          try:
-              repos = json.load(sys.stdin)
-              for r in repos:
-                  if r.get('path') == '$REPO_PATH':
-                      print(r['id'])
-                      break
-          except:
-              pass
-          " 2>/dev/null || echo "")
+          # match by GitHub URL (not by exact path) so a differently named/located repo is still found
+          python3 - <<'PY' > matches.txt
+          import json, os
+          norm = lambda u: (u or "").lower().rstrip("/").removesuffix(".git")
+          want = norm(os.environ["REPO_URL"])
+          for r in json.load(open("repos.json")) or []:
+              if norm(r.get("url")) == want:
+                  print(r["id"], r.get("path"))
+          PY
 
-          if [ -n "$REPO_ID" ]; then
-            echo "Found repo ID: $REPO_ID — updating to latest main..."
-            # Force update — discards any local changes in the Databricks Repo
-            databricks repos update "$REPO_ID" --branch main && \
-              echo "✅ Repos UI updated successfully" || \
-            {
-              echo "Update failed (conflict) — re-creating repo..."
-              databricks repos delete "$REPO_ID" || true
-              sleep 2
-              databricks repos create "$REPO_URL" gitHub --path "$REPO_PATH"
-              echo "✅ Repos UI re-created successfully"
-            }
+          if [ -s matches.txt ]; then
+            while read -r id path; do
+              echo "Updating repo $id at $path to main..."
+              databricks repos update "$id" --branch main --output json | python3 -c 'import sys,json; r=json.load(sys.stdin); print("  now at branch=%s head=%s" % (r.get("branch"), (r.get("head_commit_id") or "")[:7]))'
+            done < matches.txt
           else
-            echo "No existing repo found — creating..."
-            databricks repos create "$REPO_URL" gitHub --path "$REPO_PATH"
-            echo "✅ Repos UI created successfully"
+            echo "No repo with URL ${REPO_URL} visible to this token - creating ${REPO_PATH_EXPECTED}"
+            databricks repos create "${REPO_URL}" gitHub --path "${REPO_PATH_EXPECTED}"
           fi
 
       - name: Summary
