@@ -1,4 +1,4 @@
-# ABC Planning (TM1) P&L Pipeline — Blumetra
+# ABC Planning (TM1) P&L Pipeline — ABCD
 
 End-to-end ingestion of the *Profit and Loss* planning cube, with
 role-based row and column security driven by the cube's own security export.
@@ -74,11 +74,11 @@ Both are Databricks account groups — create them before expecting the bypass.
 The scope table is keyed by `lower(coalesce(Email, Username))`, compared with
 `lower(current_user())`. Users without an email in the TM1 export only match if
 their Databricks login equals their TM1 username; pass `identity_map`
-(`{"k.liu": "karen.liu@blumetra.com"}`) to `TM1Pipeline` to map them.
+(`{"k.liu": "karen.liu@abcd.com"}`) to `TM1Pipeline` to map them.
 
 ### Checking access
 ```python
-pipe.preview_access("karen.liu@blumetra-mock.com").show()   # visible_rows vs total_rows
+pipe.preview_access("karen.liu@abcd-mock.com").show()   # visible_rows vs total_rows
 ```
 (uses the same predicate as the row filter, for any identity, as the table owner).
 

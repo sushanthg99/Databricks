@@ -1,6 +1,6 @@
 # Project Flow & Ingestion Framework — How It Works
 
-**Project:** Dynamic Databricks Ingestion Framework (Blumetra)
+**Project:** Dynamic Databricks Ingestion Framework (ABCD)
 **Audience:** data engineers and new team members
 **Companion docs:** [architecture](architecture.md) · [metadata design](metadata_design.md) ·
 [TM1 pipeline & security](tm1_pipeline.md) · [deployment guide](deployment_guide.md)
@@ -278,7 +278,7 @@ flowchart LR
 (stage_landing → intake → bronze → silver → security → gold). For production, enable the
 commented `file_arrival` trigger on the landing volume.
 
-**Check access:** `pipe.preview_access("user@blumetra.com")` returns visible vs total rows for any identity.
+**Check access:** `pipe.preview_access("user@abcd.com")` returns visible vs total rows for any identity.
 
 ---
 
