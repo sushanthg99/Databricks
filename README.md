@@ -191,6 +191,7 @@ databricks bundle run bronze_ingestion_job --target dev
 
 ## Key Documents
 
+- [Project Flow & Ingestion Framework](docs/project_flow_and_ingestion_framework.md)
 - [Architecture](docs/architecture.md)
 - [Metadata Design](docs/metadata_design.md)
 - [Ingestion Workflow](docs/ingestion_workflow.md)
