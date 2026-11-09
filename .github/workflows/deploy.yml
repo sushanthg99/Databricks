@@ -44,10 +44,14 @@ jobs:
         id: cli1
         continue-on-error: true
         uses: databricks/setup-cli@main
+        with:
+          version: 1.23.0
 
       - name: Install Databricks CLI (retry)
         if: steps.cli1.outcome == 'failure'
         uses: databricks/setup-cli@main
+        with:
+          version: 1.23.0
 
       - name: Validate bundle
         env:
@@ -71,10 +75,14 @@ jobs:
         id: cli1
         continue-on-error: true
         uses: databricks/setup-cli@main
+        with:
+          version: 1.23.0
 
       - name: Install Databricks CLI (retry)
         if: steps.cli1.outcome == 'failure'
         uses: databricks/setup-cli@main
+        with:
+          version: 1.23.0
 
       - name: Set target
         id: target
