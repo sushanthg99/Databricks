@@ -41,6 +41,12 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Databricks CLI
+        id: cli1
+        continue-on-error: true
+        uses: databricks/setup-cli@main
+
+      - name: Install Databricks CLI (retry)
+        if: steps.cli1.outcome == 'failure'
         uses: databricks/setup-cli@main
 
       - name: Validate bundle
@@ -62,6 +68,12 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Databricks CLI
+        id: cli1
+        continue-on-error: true
+        uses: databricks/setup-cli@main
+
+      - name: Install Databricks CLI (retry)
+        if: steps.cli1.outcome == 'failure'
         uses: databricks/setup-cli@main
 
       - name: Set target
