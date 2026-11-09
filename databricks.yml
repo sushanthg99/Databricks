@@ -72,7 +72,6 @@ sync:
     - configs/**
     - notebooks/**
     - sql/**
-    - docs/**
     - demo/**
   exclude:
     - "**/__pycache__/**"
@@ -80,6 +79,7 @@ sync:
     - ".venv/**"
     - "tests/**"
     - ".kiro/**"
+    - "docs/**"
 
 # -----------------------------------------------------------------------------
 # Deployment Targets
