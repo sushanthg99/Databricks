@@ -1,7 +1,7 @@
 # Databricks notebook source
 # MAGIC %md
 # MAGIC # ABC Planning (TM1) P&L Pipeline
-# MAGIC **Blumetra — intake → Bronze → Silver → security scope → Gold (row filter + mask)**
+# MAGIC **ABCD — intake → Bronze → Silver → security scope → Gold (row filter + mask)**
 # MAGIC
 # MAGIC Thin entry point; all logic is in `ingestion_framework/tm1/pipeline.py`.
 # MAGIC Use the `stage` widget to run one stage (job tasks) or `all` (interactive).
