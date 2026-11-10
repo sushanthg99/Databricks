@@ -197,7 +197,7 @@ databricks bundle run bronze_ingestion_job --target dev
 - [Ingestion Workflow](docs/ingestion_workflow.md)
 - [Deployment Guide](docs/deployment_guide.md)
 - [Open Questions](docs/open_questions.md)
-- [ABC Planning (TM1) P&L Pipeline + Security](docs/tm1_pipeline.md)
+- [Orion Planning Financial Pipeline + Security](docs/planning_pipeline.md)
 
 ---
 

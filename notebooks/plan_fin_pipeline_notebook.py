@@ -1,25 +1,25 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # ABC Planning (TM1) P&L Pipeline
-# MAGIC **ABCD — intake → Bronze → Silver → security scope → Gold (row filter + mask)**
+# MAGIC # Orion Planning Financial Pipeline
+# MAGIC **Acme — intake → Bronze → Silver → security scope → Gold (row filter + mask)**
 # MAGIC
-# MAGIC Thin entry point; all logic is in `ingestion_framework/tm1/pipeline.py`.
+# MAGIC Thin entry point; all logic is in `ingestion_framework/planning/pipeline.py`.
 # MAGIC Use the `stage` widget to run one stage (job tasks) or `all` (interactive).
-# MAGIC See `docs/tm1_pipeline.md`.
+# MAGIC See `docs/planning_pipeline.md`.
 
 # COMMAND ----------
 
 dbutils.widgets.text("catalog_name", "workspace", "Catalog")
 dbutils.widgets.text("metadata_schema", "ingestion_metadata", "Metadata schema")
-dbutils.widgets.text("landing_schema", "tm1_landing", "Landing schema (holds the volume)")
+dbutils.widgets.text("landing_schema", "plan_landing", "Landing schema (holds the volume)")
 dbutils.widgets.text("landing_volume", "landing", "Landing volume")
 dbutils.widgets.text("run_id", "RUN001", "Run id")
 dbutils.widgets.dropdown("stage", "through_bronze",
     ["through_bronze", "all", "stage_landing", "intake", "bronze", "silver", "security", "gold"], "Stage")
 dbutils.widgets.dropdown("stage_from_repo", "false", ["true", "false"],
     "Copy demo data from repo into the volume first")
-dbutils.widgets.text("admin_group", "tm1_admins", "Group that bypasses row filter / mask")
-dbutils.widgets.text("text_reader_group", "tm1_text_readers", "Group that may read comment text")
+dbutils.widgets.text("admin_group", "plan_admins", "Group that bypasses row filter / mask")
+dbutils.widgets.text("text_reader_group", "plan_text_readers", "Group that may read comment text")
 dbutils.widgets.text("dq_max_fail_pct", "5", "DQ error-rule failure threshold (%)")
 dbutils.widgets.text("preview_identity", "", "Preview what this identity can see (optional)")
 dbutils.widgets.text("log_level", "INFO", "Log level")
@@ -46,14 +46,14 @@ print("repo_root:", repo_root)
 for _m in [m for m in sys.modules if m == "ingestion_framework" or m.startswith("ingestion_framework.")]:
     del sys.modules[_m]
 
-from ingestion_framework.tm1.manifest import resolve_run_dir
-from ingestion_framework.tm1.pipeline import TM1Pipeline, stage_run
+from ingestion_framework.planning.manifest import resolve_run_dir
+from ingestion_framework.planning.pipeline import PlanningPipeline, stage_run
 
 landing_base = f"/Volumes/{p['catalog_name']}/{p['landing_schema']}/{p['landing_volume']}/{p['run_id']}"
 # tolerate nested uploads: use the folder that really contains _READY_<run_id>.json
 landing_dir = resolve_run_dir(landing_base, p["run_id"])
 print("landing_dir:", landing_dir)
-pipe = TM1Pipeline(
+pipe = PlanningPipeline(
     spark, catalog=p["catalog_name"], landing_dir=landing_dir, run_id=p["run_id"],
     meta_schema=p["metadata_schema"], admin_group=p["admin_group"],
     text_reader_group=p["text_reader_group"], dq_max_fail_pct=float(p["dq_max_fail_pct"]))
@@ -70,7 +70,7 @@ if p["stage"] in ("all", "through_bronze", "stage_landing"):
     spark.sql(f"CREATE SCHEMA IF NOT EXISTS {p['catalog_name']}.{p['landing_schema']}")
     spark.sql(f"CREATE VOLUME IF NOT EXISTS {p['catalog_name']}.{p['landing_schema']}.{p['landing_volume']}")
     if p["stage_from_repo"] == "true":
-        stage_run(f"{repo_root}/demo/tm1_mock_data/{p['run_id']}", landing_base)
+        stage_run(f"{repo_root}/demo/plan_mock_data/{p['run_id']}", landing_base)
         print("staged to", landing_base)
 
 # COMMAND ----------
@@ -114,20 +114,20 @@ if stage in ("through_bronze", "bronze", "all"):
     # reconciliation: Bronze rows vs the manifest row_count of every file
     display(spark.createDataFrame(pipe.verify_bronze()))
     display(spark.sql(f"SHOW TABLES IN {p['catalog_name']}.{pipe.bronze}"))
-    display(spark.table(pipe.t(pipe.bronze, "bronze_pnl_fact")).limit(10))
+    display(spark.table(pipe.t(pipe.bronze, "bronze_fin_fact")).limit(10))
 
 # COMMAND ----------
 
 if stage in ("all", "gold"):
     display(spark.sql(f"SELECT stage, status, row_count, message, event_ts "
-                      f"FROM {p['catalog_name']}.{p['metadata_schema']}.tm1_run_log "
+                      f"FROM {p['catalog_name']}.{p['metadata_schema']}.plan_run_log "
                       f"WHERE run_id = '{p['run_id']}' ORDER BY event_ts"))
     display(spark.sql(f"SELECT rule, severity, failed_rows, ROUND(fail_pct, 2) AS fail_pct, breached "
-                      f"FROM {p['catalog_name']}.{p['metadata_schema']}.tm1_dq_results "
+                      f"FROM {p['catalog_name']}.{p['metadata_schema']}.plan_dq_results "
                       f"WHERE run_id = '{p['run_id']}' ORDER BY failed_rows DESC"))
     display(spark.sql(f"SELECT identity, dimension, count(*) AS members, "
                       f"sum(CASE WHEN member = '*' THEN 1 ELSE 0 END) AS open_dim "
-                      f"FROM {p['catalog_name']}.{p['metadata_schema']}.tm1_user_dim_scope "
+                      f"FROM {p['catalog_name']}.{p['metadata_schema']}.plan_user_dim_scope "
                       f"GROUP BY identity, dimension ORDER BY identity, dimension"))
 
 if p["preview_identity"]:

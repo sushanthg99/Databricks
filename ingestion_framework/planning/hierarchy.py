@@ -1,7 +1,7 @@
 """
 hierarchy.py
 ============
-Flatten TM1 hierarchy JSON (nested ``children``) into relational shapes:
+Flatten Planning hierarchy JSON (nested ``children``) into relational shapes:
 
 * ``flatten_hierarchies``  -> edge rows  (one per member per hierarchy)
 * ``build_closure``        -> closure rows (member, ancestor, distance)

@@ -67,7 +67,7 @@ Open a **new PowerShell terminal** and run:
 
 ```powershell
 # Navigate to the project folder
-cd "C:\Users\sushanth.gangadhara\OneDrive - Blumetra Solutions (I) Private Limited\Desktop\Databricks\dynamic-databricks-ingestion"
+cd "C:\Users\sushanth.gangadhara\OneDrive - Acme Solutions (I) Private Limited\Desktop\Databricks\dynamic-databricks-ingestion"
 
 # Check what files changed
 git status
@@ -154,7 +154,7 @@ databricks bundle run bronze_ingestion_job --target dev --profile dev
 Run this single command after making changes:
 
 ```powershell
-cd "C:\Users\sushanth.gangadhara\OneDrive - Blumetra Solutions (I) Private Limited\Desktop\Databricks\dynamic-databricks-ingestion"; git add .; git commit -m "update"; git push; databricks bundle deploy --target dev --profile dev; databricks repos update 1515843394154791 --branch main --profile dev
+cd "C:\Users\sushanth.gangadhara\OneDrive - Acme Solutions (I) Private Limited\Desktop\Databricks\dynamic-databricks-ingestion"; git add .; git commit -m "update"; git push; databricks bundle deploy --target dev --profile dev; databricks repos update 1515843394154791 --branch main --profile dev
 ```
 
 ---

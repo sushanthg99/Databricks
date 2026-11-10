@@ -1,8 +1,8 @@
 """
-ingestion_framework.tm1
+ingestion_framework.planning
 =======================
-ABC Planning (TM1-style) cube ingestion: manifest intake gate, hierarchy
-flattening, security resolution and the Bronze/Silver/Gold P&L pipeline.
+Orion Planning cube ingestion: manifest intake gate, hierarchy
+flattening, security resolution and the Bronze/Silver/Gold Financial pipeline.
 
 Pure-Python modules (no Spark needed, unit-testable):
     manifest   - validate a landing run against its _READY manifest
@@ -10,5 +10,5 @@ Pure-Python modules (no Spark needed, unit-testable):
     security   - resolve group grants into per-user dimension scopes
 
 Spark module:
-    pipeline   - TM1Pipeline (intake -> bronze -> silver -> security -> gold)
+    pipeline   - PlanningPipeline (intake -> bronze -> silver -> security -> gold)
 """

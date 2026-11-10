@@ -1,9 +1,9 @@
 # Project Flow & Ingestion Framework — How It Works
 
-**Project:** Dynamic Databricks Ingestion Framework (ABCD)
+**Project:** Dynamic Databricks Ingestion Framework (Acme)
 **Audience:** data engineers and new team members
 **Companion docs:** [architecture](architecture.md) · [metadata design](metadata_design.md) ·
-[TM1 pipeline & security](tm1_pipeline.md) · [deployment guide](deployment_guide.md)
+[Planning pipeline & security](planning_pipeline.md) · [deployment guide](deployment_guide.md)
 
 ---
 
@@ -19,7 +19,7 @@ The project contains **two ingestion paths** that share the same platform conven
 | Path | Source | Style | Status |
 |---|---|---|---|
 | **A. Generic framework** | CSV / JSON / Parquet / Delta / API files, any dataset | YAML → metadata tables → Auto Loader / batch | Bronze implemented; Silver/Gold are scaffolds (`TODO Phase 2/3`) |
-| **B. ABC Planning (TM1) P&L pipeline** | Planning-cube extract: fact, dimensions, hierarchies, security | Manifest-gated run → Bronze → Silver → security → Gold | Written end to end; **Bronze being validated on Databricks**, later stages not yet run on a workspace |
+| **B. Orion Planning Financial pipeline** | Planning-cube extract: fact, dimensions, hierarchies, security | Manifest-gated run → Bronze → Silver → security → Gold | Written end to end; **Bronze being validated on Databricks**, later stages not yet run on a workspace |
 
 ---
 
@@ -30,7 +30,7 @@ flowchart LR
     subgraph Sources
       S1[CSV / JSON / Parquet<br/>S3 or UC Volume]
       S2[REST APIs]
-      S3[ABC Planning TM1<br/>cube extract]
+      S3[Orion Planning Planning<br/>cube extract]
     end
 
     subgraph Control["Control plane (metadata)"]
@@ -41,7 +41,7 @@ flowchart LR
     S1 --> A[Path A: BronzeIngestion<br/>+ AutoLoaderEngine]
     MT --> A
     S2 -.-> A
-    S3 --> B[Path B: TM1Pipeline<br/>intake gate]
+    S3 --> B[Path B: PlanningPipeline<br/>intake gate]
 
     A --> BR[(Bronze<br/>raw Delta)]
     B --> BR
@@ -64,14 +64,14 @@ dynamic-databricks-ingestion/
 ├── ingestion_framework/         Reusable core (never imports from src/)
 │   ├── metadata_service/        MetadataLoader  (YAML → metadata tables)
 │   ├── ingestion_engine/        AutoLoaderEngine, SchemaRegistry
-│   └── tm1/                     manifest · hierarchy · security · pipeline  (Path B)
+│   └── planning/                     manifest · hierarchy · security · pipeline  (Path B)
 ├── src/                         Layer orchestration
 │   ├── bronze/                  BronzeIngestion, BronzeLoader, data_extraction
 │   ├── silver/                  SilverTransformer, DataQualityEngine   (scaffold)
 │   ├── gold/                    Gold transformations                   (scaffold)
 │   └── api/                     REST API fetcher
-├── notebooks/                   Thin Databricks entry points (bronze/silver/gold + tm1_pnl_pipeline_notebook)
-├── resources/                   Asset-bundle jobs (databricks_job.yml, tm1_pnl_job.yml)
+├── notebooks/                   Thin Databricks entry points (bronze/silver/gold + plan_fin_pipeline_notebook)
+├── resources/                   Asset-bundle jobs (databricks_job.yml, plan_fin_job.yml)
 ├── databricks.yml               Bundle: variables + dev / uat / prod targets
 ├── .github/workflows/deploy.yml CI/CD: push to main → deploy + Repos sync
 ├── demo/                        Demo notebook, sample TSVs
@@ -153,19 +153,19 @@ Compute is serverless. Parameters (`environment`, `catalog_name`, `metadata_sche
 
 ---
 
-## 5. Path B — ABC Planning (TM1) P&L pipeline
+## 5. Path B — Orion Planning Financial pipeline
 
 Planning-cube data does not fit "one file = one table": a run is a **set of related files**
 (fact + dimensions + hierarchies + security) that must be consistent with each other. So Path B
-adds a **manifest gate** and dedicated Silver/Gold logic. Details: [tm1_pipeline.md](tm1_pipeline.md).
+adds a **manifest gate** and dedicated Silver/Gold logic. Details: [planning_pipeline.md](planning_pipeline.md).
 
 ### 5.1 Landing contract
 
 The extract writes a run folder to a UC Volume — data files first, `_READY_<RUN>.json` **last**:
 
 ```
-/Volumes/<catalog>/tm1_landing/landing/RUN001/
-   profit_and_loss_data_RUN001.tsv          (fact, ~27k rows)
+/Volumes/<catalog>/plan_landing/landing/RUN001/
+   financial_data_RUN001.tsv          (fact, ~27k rows)
    dimension_members_RUN001.tsv   dimension_attribute_RUN001.tsv   dimension_alias_RUN001.tsv
    dimension_primary_hierarchy_RUN001.json  dimension_alternate_hierarchy_RUN001.json
    security_user_group_RUN001.tsv           security_dimension_access_RUN001.tsv
@@ -185,16 +185,16 @@ flowchart TD
     V --> S
     S[3 SILVER<br/>typed · trimmed · deduped<br/>DQ rules → quarantine + dq_results<br/>hierarchy edges + closure] --> SEC
     SEC[4 SECURITY<br/>groups + grants → per-user scope] --> G
-    G[5 GOLD<br/>dim_member · dim_hierarchy_closure<br/>fact_pnl · fact_pnl_text · summary view] --> P[Row filter + column mask applied last]
+    G[5 GOLD<br/>dim_member · dim_hierarchy_closure<br/>fact_fin · fact_fin_text · summary view] --> P[Row filter + column mask applied last]
 ```
 
 | Stage | What happens | Key tables |
 |---|---|---|
-| **Intake** | `validate_run()` checks status = READY, `file_count`, each file's existence, size, SHA-256, row count and header; total rows. Any error aborts before loading. | `tm1_run_log` |
-| **Bronze** | Reads each TSV with Spark (all strings, quote handling off because values contain bare `"`), renames columns to `snake_case` (Delta-safe), stamps lineage columns, writes with `replaceWhere _run_id = '<RUN>'` — **re-running a run is idempotent and history of all runs is kept**. Hierarchy JSON is flattened in Python into edge rows. `verify_bronze()` reconciles counts against the manifest and fails on mismatch. | `tm1_bronze.bronze_*` |
-| **Silver** | Casts types (decimal(28,4), timestamps, booleans), trims, de-duplicates on the 9-dimension natural key keeping the latest `last_updated_at`. DQ: *error* rules (keys not null, value type valid, numeric/string value present, time period format, known version) send rows to `silver_pnl_fact_quarantine` and fail the run above `dq_max_fail_pct` (5%); *warn* rules (member is a valid leaf, e.g. orphans such as `UNMAPPED`) are only counted. Builds hierarchy edges + closure; types the security files and flags `is_effective`. | `tm1_silver.*`, `tm1_dq_results` |
-| **Security** | Resolves group grants to a flat per-user scope (rules in §6). | `tm1_user_dim_scope` |
-| **Gold** | Conformed `dim_member` (attributes/aliases as maps), hierarchy closure, `fact_pnl` (numeric: Amount, Headcount), `fact_pnl_text` (Comment, Approval Status ...), `vw_pnl_version_summary` (Actual vs Budget vs Forecast). Drops policies, rebuilds, re-applies policies last. | `tm1_gold.*` |
+| **Intake** | `validate_run()` checks status = READY, `file_count`, each file's existence, size, SHA-256, row count and header; total rows. Any error aborts before loading. | `plan_run_log` |
+| **Bronze** | Reads each TSV with Spark (all strings, quote handling off because values contain bare `"`), renames columns to `snake_case` (Delta-safe), stamps lineage columns, writes with `replaceWhere _run_id = '<RUN>'` — **re-running a run is idempotent and history of all runs is kept**. Hierarchy JSON is flattened in Python into edge rows. `verify_bronze()` reconciles counts against the manifest and fails on mismatch. | `plan_bronze.bronze_*` |
+| **Silver** | Casts types (decimal(28,4), timestamps, booleans), trims, de-duplicates on the 9-dimension natural key keeping the latest `last_updated_at`. DQ: *error* rules (keys not null, value type valid, numeric/string value present, time period format, known version) send rows to `silver_fin_fact_quarantine` and fail the run above `dq_max_fail_pct` (5%); *warn* rules (member is a valid leaf, e.g. orphans such as `UNMAPPED`) are only counted. Builds hierarchy edges + closure; types the security files and flags `is_effective`. | `plan_silver.*`, `plan_dq_results` |
+| **Security** | Resolves group grants to a flat per-user scope (rules in §6). | `plan_user_dim_scope` |
+| **Gold** | Conformed `dim_member` (attributes/aliases as maps), hierarchy closure, `fact_fin` (numeric: Amount, Headcount), `fact_fin_text` (Comment, Approval Status ...), `vw_fin_version_summary` (Actual vs Budget vs Forecast). Drops policies, rebuilds, re-applies policies last. | `plan_gold.*` |
 
 ### 5.3 Why it is built this way
 
@@ -208,20 +208,20 @@ flowchart TD
 
 ## 6. Security model (Path B)
 
-TM1 exports who may see what; Databricks enforces it with Unity Catalog row filters and column masks.
+Planning exports who may see what; Databricks enforces it with Unity Catalog row filters and column masks.
 
 ```mermaid
 flowchart LR
     UG[security_user_group<br/>user → group] --> R
     GA[security_dimension_access<br/>group → dimension element → READ/WRITE/LOCK/NONE] --> R
     H[hierarchy closure<br/>consolidated → leaves] --> R
-    R[resolve_scopes<br/>rules below] --> T[(tm1_user_dim_scope<br/>identity · dimension · member)]
-    T --> F[ROW FILTER<br/>tm1_pnl_row_filter]
-    F --> FP[fact_pnl · fact_pnl_text]
-    M[COLUMN MASK<br/>tm1_text_mask] --> FP
+    R[resolve_scopes<br/>rules below] --> T[(plan_user_dim_scope<br/>identity · dimension · member)]
+    T --> F[ROW FILTER<br/>plan_fin_row_filter]
+    F --> FP[fact_fin · fact_fin_text]
+    M[COLUMN MASK<br/>plan_text_mask] --> FP
 ```
 
-**Resolution rules** (`ingestion_framework/tm1/security.py`):
+**Resolution rules** (`ingestion_framework/planning/security.py`):
 
 1. Inactive users get no access.
 2. A grant is effective when `Granted_Date <= today` and it has not expired.
@@ -231,8 +231,8 @@ flowchart LR
 6. A user with no effective grant at all is denied everywhere (fail closed).
 
 A fact row is visible only if it passes **every** secured dimension (Currency, Legal Entity,
-Department, Molecule, Profit and Loss Account, Version, Time Period). Members of `tm1_admins`
-bypass the filter; `tm1_text_readers` (and admins) see unmasked comment text.
+Department, Molecule, Financial Account, Version, Time Period). Members of `plan_admins`
+bypass the filter; `plan_text_readers` (and admins) see unmasked comment text.
 Identity = `lower(coalesce(email, username))` matched with `lower(current_user())`.
 
 ---
@@ -265,20 +265,20 @@ flowchart LR
 
 **Path A (generic):** `databricks bundle deploy -t dev` → `databricks bundle run bronze_ingestion_job -t dev`.
 
-**Path B (TM1), interactively** — notebook `notebooks/tm1_pnl_pipeline_notebook` on serverless:
+**Path B (Planning), interactively** — notebook `notebooks/plan_fin_pipeline_notebook` on serverless:
 
-1. `stage = stage_landing` (creates `<catalog>.tm1_landing.landing` volume).
+1. `stage = stage_landing` (creates `<catalog>.plan_landing.landing` volume).
 2. Upload the run's 9 files into the volume folder `RUN001` (Catalog → volume → Upload).
 3. `stage = through_bronze` → intake + Bronze + reconciliation (expected counts: fact 27,347 ·
    members 250 · attributes 418 · aliases 141 · user_group 54 · dimension_access 78 ·
    hierarchies 6 primary + 4 alternate).
 4. `stage = all` for Silver, security and Gold.
 
-**Path B as a job:** `databricks bundle run tm1_pnl_job -t dev`
+**Path B as a job:** `databricks bundle run plan_fin_job -t dev`
 (stage_landing → intake → bronze → silver → security → gold). For production, enable the
 commented `file_arrival` trigger on the landing volume.
 
-**Check access:** `pipe.preview_access("user@abcd.com")` returns visible vs total rows for any identity.
+**Check access:** `pipe.preview_access("user@acme.com")` returns visible vs total rows for any identity.
 
 ---
 
@@ -287,9 +287,9 @@ commented `file_arrival` trigger on the landing volume.
 | Where | What |
 |---|---|
 | `ingestion_runtime_state` | Path A: per dataset per run — status, rows, duration, error |
-| `tm1_run_log` | Path B: per stage per run — OK / FAILED / BREACH, row count, message |
-| `tm1_dq_results` | Path B: per rule — failed rows, %, threshold, breached |
-| `silver_pnl_fact_quarantine` | Rows rejected by error rules, with the failed rule names |
+| `plan_run_log` | Path B: per stage per run — OK / FAILED / BREACH, row count, message |
+| `plan_dq_results` | Path B: per rule — failed rows, %, threshold, breached |
+| `silver_fin_fact_quarantine` | Rows rejected by error rules, with the failed rule names |
 | Unity Catalog | Lineage, audit logs, grants |
 
 ---
@@ -306,7 +306,7 @@ commented `file_arrival` trigger on the landing volume.
 * `WRITE`/`LOCK` have no Databricks equivalent; row filters control visibility only.
 * No currency conversion (no FX-rate data in the extract). `Adj-<year>` periods keep `period_start = NULL`.
 * UAT/prod workspace hosts, buckets and approval gates are not configured yet.
-* Test coverage is limited to `MetadataLoader` and the three TM1 pure-Python modules.
+* Test coverage is limited to `MetadataLoader` and the three Planning pure-Python modules.
 
 ---
 
@@ -322,4 +322,4 @@ commented `file_arrival` trigger on the landing volume.
 | **Closure table** | (ancestor, member, distance) rows that make hierarchy roll-ups simple joins |
 | **Row filter / column mask** | UC functions that hide rows or mask values per querying user |
 | **Leaf / consolidated** | Lowest-level members vs members that roll up other members |
-| **TM1 / ABC Planning** | The planning system whose P&L cube is the Path B source |
+| **Planning / Orion Planning** | The planning system whose Financial cube is the Path B source |

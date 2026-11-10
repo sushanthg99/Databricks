@@ -1,8 +1,8 @@
 # =============================================================================
-# ABC Planning (TM1) P&L pipeline — multi-task Workflow
+# Orion Planning Financial pipeline — multi-task Workflow
 #   stage_landing -> intake -> bronze -> silver -> security -> gold
 # Deploy: databricks bundle deploy --target dev
-# Run:    databricks bundle run tm1_pnl_job --target dev
+# Run:    databricks bundle run plan_fin_job --target dev
 #
 # Production trigger: uncomment `trigger.file_arrival` and point `url` at the
 # landing volume folder so a new run starts when the extract drops its files.
@@ -11,8 +11,8 @@
 
 resources:
   jobs:
-    tm1_pnl_job:
-      name: "[${bundle.target}] ABC Planning P&L Pipeline"
+    plan_fin_job:
+      name: "[${bundle.target}] Orion Planning Financial Pipeline"
       max_concurrent_runs: 1
       timeout_seconds: 7200
 
@@ -24,19 +24,19 @@ resources:
         - name: metadata_schema
           default: ${var.metadata_schema}
         - name: stage_from_repo
-          default: "false"         # "true" copies demo data from the repo (demo/tm1_mock_data) into the volume
+          default: "false"         # "true" copies demo data from the repo (demo/plan_mock_data) into the volume
         - name: log_level
           default: ${var.log_level}
 
       # trigger:
       #   pause_status: UNPAUSED
       #   file_arrival:
-      #     url: /Volumes/<catalog>/tm1_landing/landing/
+      #     url: /Volumes/<catalog>/plan_landing/landing/
 
       tasks:
         - task_key: stage_landing
           notebook_task:
-            notebook_path: ${workspace.file_path}/notebooks/tm1_pnl_pipeline_notebook
+            notebook_path: ${workspace.file_path}/notebooks/plan_fin_pipeline_notebook
             base_parameters:
               stage: stage_landing
               run_id: "{{job.parameters.run_id}}"
@@ -49,7 +49,7 @@ resources:
           depends_on:
             - task_key: stage_landing
           notebook_task:
-            notebook_path: ${workspace.file_path}/notebooks/tm1_pnl_pipeline_notebook
+            notebook_path: ${workspace.file_path}/notebooks/plan_fin_pipeline_notebook
             base_parameters:
               stage: intake
               run_id: "{{job.parameters.run_id}}"
@@ -63,7 +63,7 @@ resources:
             - task_key: intake
           max_retries: 1
           notebook_task:
-            notebook_path: ${workspace.file_path}/notebooks/tm1_pnl_pipeline_notebook
+            notebook_path: ${workspace.file_path}/notebooks/plan_fin_pipeline_notebook
             base_parameters:
               stage: bronze
               run_id: "{{job.parameters.run_id}}"
@@ -76,7 +76,7 @@ resources:
           depends_on:
             - task_key: bronze
           notebook_task:
-            notebook_path: ${workspace.file_path}/notebooks/tm1_pnl_pipeline_notebook
+            notebook_path: ${workspace.file_path}/notebooks/plan_fin_pipeline_notebook
             base_parameters:
               stage: silver
               run_id: "{{job.parameters.run_id}}"
@@ -89,7 +89,7 @@ resources:
           depends_on:
             - task_key: silver
           notebook_task:
-            notebook_path: ${workspace.file_path}/notebooks/tm1_pnl_pipeline_notebook
+            notebook_path: ${workspace.file_path}/notebooks/plan_fin_pipeline_notebook
             base_parameters:
               stage: security
               run_id: "{{job.parameters.run_id}}"
@@ -102,7 +102,7 @@ resources:
           depends_on:
             - task_key: security
           notebook_task:
-            notebook_path: ${workspace.file_path}/notebooks/tm1_pnl_pipeline_notebook
+            notebook_path: ${workspace.file_path}/notebooks/plan_fin_pipeline_notebook
             base_parameters:
               stage: gold
               run_id: "{{job.parameters.run_id}}"

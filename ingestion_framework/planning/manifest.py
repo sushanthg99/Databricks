@@ -39,7 +39,7 @@ def resolve_run_dir(base_dir: str | Path, run_id: str) -> str:
     """
     Return the folder that actually holds `_READY_<run_id>.json`.
 
-    Uploads often nest the run folder (e.g. <base>/tm1_mock_data/RUN001/...), so look in
+    Uploads often nest the run folder (e.g. <base>/plan_mock_data/RUN001/...), so look in
     base_dir first, then search below it. If no manifest is found anywhere, return base_dir
     unchanged so the caller can report a clear "not found" error.
     """

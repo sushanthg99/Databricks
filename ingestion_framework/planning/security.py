@@ -1,7 +1,7 @@
 """
 security.py
 ===========
-Resolve TM1-style group security into a flat per-user scope table that a
+Resolve cube-style group security into a flat per-user scope table that a
 Databricks row filter can join against.
 
 Inputs
@@ -13,7 +13,7 @@ grants   : rows of security_dimension_access
 leaf_map : {(dimension, member): {leaf members}}   (hierarchy.build_leaf_map)
 leaves_by_dim : {dimension: {all leaf members}}
 
-Resolution rules (documented in docs/tm1_pipeline.md)
+Resolution rules (documented in docs/planning_pipeline.md)
 -----------------------------------------------------
 1. Inactive users get no scope (they see nothing).
 2. A grant is effective when Granted_Date <= today and (no Expiry_Date or
